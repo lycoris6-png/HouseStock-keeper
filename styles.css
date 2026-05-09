@@ -180,12 +180,12 @@ select:focus-visible {
   animation: float-around 4.2s ease-in-out infinite;
 }
 .floating-can {
-  left: -10px;
-  top: 34px;
+  left: -14px;
+  bottom: 16px;   /* 顔から離して下半分に */
 }
 .floating-leaf {
-  right: -2px;
-  bottom: 28px;
+  right: -14px;
+  bottom: 4px;    /* 右下の足元あたりに */
   animation-delay: -1.6s;
 }
 

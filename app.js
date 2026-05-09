@@ -417,7 +417,11 @@ function itemStockLabel(item) {
 
 function isItemLow(item) {
   const countLow = item.minQuantity > 0 && item.quantity <= item.minQuantity;
-  const amountLow = item.stockMode === 'amount' && Number(item.amountPercent ?? 100) <= 20;
+  // 残量モード: 在庫0 かつ 残量% が閾値以下でリスト入り
+  const threshold = Number.isFinite(Number(item.minAmountPercent)) ? Number(item.minAmountPercent) : 10;
+  const amountLow = item.stockMode === 'amount'
+    && item.quantity <= 0
+    && Number(item.amountPercent ?? 100) <= threshold;
   return countLow || amountLow;
 }
 
@@ -719,6 +723,7 @@ function updateDateTypeLabel() {
 function updateStockModeFields() {
   const mode = $('itemStockMode')?.value || 'count';
   $('itemAmountRow')?.classList.toggle('hidden', mode !== 'amount');
+  $('itemMinAmountRow')?.classList.toggle('hidden', mode !== 'amount');
 }
 
 // ─────────────────────────────────────────────
@@ -744,6 +749,7 @@ function openAddItem() {
   $('itemSubcategory').value = currentSubcategory !== 'all' ? currentSubcategory : defaultSubcategory($('itemCategory').value);
   $('itemStockMode').value = 'count';
   $('itemAmountPercent').value = '100';
+  $('itemMinAmountPercent').value = '10';
   updateStockModeFields();
   $('itemQty').value      = '1';
   $('itemUnit').value     = '個';
@@ -768,6 +774,7 @@ function openEditItem(itemId) {
   $('itemSubcategory').value = item.subcategory || defaultSubcategory(item.category);
   $('itemStockMode').value = item.stockMode || 'count';
   $('itemAmountPercent').value = Number.isFinite(Number(item.amountPercent)) ? item.amountPercent : 100;
+  $('itemMinAmountPercent').value = Number.isFinite(Number(item.minAmountPercent)) ? item.minAmountPercent : 10;
   updateStockModeFields();
   $('itemQty').value      = item.quantity;
   $('itemUnit').value     = item.unit;
@@ -795,8 +802,9 @@ function saveItem() {
       item.name        = name;
       item.category    = $('itemCategory').value;
       item.subcategory = $('itemSubcategory').value || defaultSubcategory(item.category);
-      item.stockMode   = $('itemStockMode').value;
-      item.amountPercent = item.stockMode === 'amount' ? Math.min(100, Math.max(0, parseFloat($('itemAmountPercent').value) || 0)) : null;
+      item.stockMode        = $('itemStockMode').value;
+      item.amountPercent    = item.stockMode === 'amount' ? Math.min(100, Math.max(0, parseFloat($('itemAmountPercent').value) || 0)) : null;
+      item.minAmountPercent = item.stockMode === 'amount' ? Math.min(100, Math.max(0, parseFloat($('itemMinAmountPercent').value) || 10)) : null;
       item.quantity    = qty;
       item.unit        = $('itemUnit').value;
       item.minQuantity = minQty;
@@ -810,8 +818,9 @@ function saveItem() {
       id: uid(), name,
       category:    $('itemCategory').value,
       subcategory: $('itemSubcategory').value || defaultSubcategory($('itemCategory').value),
-      stockMode:   $('itemStockMode').value,
-      amountPercent: $('itemStockMode').value === 'amount' ? Math.min(100, Math.max(0, parseFloat($('itemAmountPercent').value) || 0)) : null,
+      stockMode:        $('itemStockMode').value,
+      amountPercent:    $('itemStockMode').value === 'amount' ? Math.min(100, Math.max(0, parseFloat($('itemAmountPercent').value) || 0)) : null,
+      minAmountPercent: $('itemStockMode').value === 'amount' ? Math.min(100, Math.max(0, parseFloat($('itemMinAmountPercent').value) || 10)) : null,
       quantity:    qty,
       unit:        $('itemUnit').value,
       minQuantity: minQty,
