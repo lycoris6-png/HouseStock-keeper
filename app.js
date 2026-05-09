@@ -72,14 +72,15 @@ function hasDriveToken() {
   return Boolean(driveToken && Date.now() < driveTokenExpiresAt - 60000);
 }
 
-function ensureDriveToken() {
-  if (hasDriveToken()) return Promise.resolve(driveToken);
+function ensureDriveToken(forceConsent = false) {
+  if (!forceConsent && hasDriveToken()) return Promise.resolve(driveToken);
   const clientId = state.settings.driveClientId;
   if (!clientId) return Promise.reject(new Error('Client ID が設定されていません'));
   if (!window.google?.accounts?.oauth2)
     return Promise.reject(new Error('Google Identity Services が読み込まれていません'));
 
   return new Promise((resolve, reject) => {
+    // Client IDが変わった場合は再生成
     if (!driveTokenClient) {
       driveTokenClient = window.google.accounts.oauth2.initTokenClient({
         client_id: clientId,
@@ -93,7 +94,8 @@ function ensureDriveToken() {
         error_callback() { reject(new Error('Drive 認証がキャンセルされました')); },
       });
     }
-    driveTokenClient.requestAccessToken({ prompt: '' });
+    // 初回接続は必ず同意画面を出す、以降はサイレント
+    driveTokenClient.requestAccessToken({ prompt: forceConsent ? 'consent' : '' });
   });
 }
 
@@ -606,7 +608,7 @@ function saveSettings() {
 
 async function connectDrive() {
   try {
-    await ensureDriveToken();
+    await ensureDriveToken(true); // 初回は必ず同意画面を表示
     renderSettings();
     showToast('Drive に接続しました ☁️');
     await loadFromDrive();
