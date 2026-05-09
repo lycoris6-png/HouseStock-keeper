@@ -185,7 +185,7 @@ select:focus-visible {
 }
 .floating-leaf {
   right: -14px;
-  bottom: 4px;    /* 右下の足元あたりに */
+  bottom: -14px;  /* イラスト枠の外・足元より下 */
   animation-delay: -1.6s;
 }
 
