@@ -662,9 +662,27 @@ function renderSettings() {
   if (inp) inp.value = state.settings.driveClientId || '';
   const st = $('driveStatusText');
   if (st) {
-    if (hasDriveToken())               st.textContent = '接続中 ✅';
+    if (hasDriveToken())                   st.textContent = '接続中 ✅';
     else if (state.settings.driveClientId) st.textContent = '未接続';
-    else                               st.textContent = '未設定';
+    else                                   st.textContent = '未設定';
+  }
+  // インストールボタン表示制御
+  const btn    = $('installBtn');
+  const status = $('installStatus');
+  if (!btn || !status) return;
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+  if (isStandalone) {
+    btn.style.display    = 'none';
+    status.style.display = '';
+    status.textContent   = '✅ すでにインストール済みです';
+  } else if (_installPrompt) {
+    btn.style.display    = '';
+    status.style.display = 'none';
+  } else {
+    btn.style.display    = 'none';
+    status.style.display = '';
+    status.textContent   = 'iPhoneはSafariの「共有 → ホーム画面に追加」からインストールできます。';
   }
 }
 
@@ -1067,6 +1085,46 @@ async function syncNow() {
 function registerSW() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./service-worker.js').catch(console.warn);
+  }
+}
+
+// ─────────────────────────────────────────────
+//  PWA インストール
+// ─────────────────────────────────────────────
+let _installPrompt = null;
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  _installPrompt = e;
+  // ボタンを表示
+  const btn = $('installBtn');
+  if (btn) btn.style.display = '';
+});
+
+window.addEventListener('appinstalled', () => {
+  _installPrompt = null;
+  const btn    = $('installBtn');
+  const status = $('installStatus');
+  if (btn)    btn.style.display = 'none';
+  if (status) { status.style.display = ''; status.textContent = '✅ インストール済みです'; }
+});
+
+async function triggerInstall() {
+  if (!_installPrompt) {
+    // すでにインストール済み or iOSなど非対応
+    const status = $('installStatus');
+    if (status) {
+      status.style.display = '';
+      status.textContent = 'iPhoneはSafariの「共有 → ホーム画面に追加」からインストールできます。';
+    }
+    return;
+  }
+  _installPrompt.prompt();
+  const { outcome } = await _installPrompt.userChoice;
+  if (outcome === 'accepted') {
+    _installPrompt = null;
+    const btn = $('installBtn');
+    if (btn) btn.style.display = 'none';
   }
 }
 

@@ -89,6 +89,19 @@
     </div>
 
     <div class="settings-section">
+      <h2>📲 アプリをインストール</h2>
+      <div class="settings-row">
+        <p class="hint">ホーム画面に追加するとアプリとして使えます。iPhoneはSafariで「共有 → ホーム画面に追加」をご利用ください。</p>
+      </div>
+      <div class="settings-row">
+        <button class="btn-primary" id="installBtn" onclick="triggerInstall()" style="display:none">
+          📲 ホーム画面にインストール
+        </button>
+        <p id="installStatus" class="hint" style="display:none"></p>
+      </div>
+    </div>
+
+    <div class="settings-section">
       <h2>📊 データ情報</h2>
       <div class="settings-row">
         <p class="hint">データは端末の localStorage に保存されます。Drive へ保存したい時だけ、下のボタンから手動で同期してください。</p>
