@@ -20,15 +20,89 @@ const CATEGORIES = [
 const UNITS = ['個', '本', '袋', '缶', '箱', '枚', 'セット', 'パック', 'g', 'kg', 'ml', 'L', '冊', '錠', '包'];
 
 const CHAR = {
+  arteGentle: 'assets/chibi_inventory_icons/Arte/Arte_01_gentle_standing.png',
+  arteSmile: 'assets/chibi_inventory_icons/Arte/Arte_02_smiling_hands.png',
+  arteCheck: 'assets/chibi_inventory_icons/Arte/Arte_03_clipboard_check.png',
   arteWave: 'assets/chibi_inventory_icons/Arte/Arte_04_waving.png',
+  arteHappy: 'assets/chibi_inventory_icons/Arte/Arte_05_happy_clasped.png',
   arteDone: 'assets/chibi_inventory_icons/Arte/Arte_13_clipboard_done.png',
   arteBasket: 'assets/chibi_inventory_icons/Arte/Arte_09_carrying_basket.png',
   arteBox: 'assets/chibi_inventory_icons/Arte/Arte_06_carrying_supplies_box.png',
+  arteSort: 'assets/chibi_inventory_icons/Arte/Arte_11_sorting_boxes.png',
+  arteShelf: 'assets/chibi_inventory_icons/Arte/Arte_12_stocking_shelf.png',
+  risolArms: 'assets/chibi_inventory_icons/Risol/Risol_01_arms_crossed.png',
   risolSmug: 'assets/chibi_inventory_icons/Risol/Risol_02_smug_pose.png',
+  risolComplain: 'assets/chibi_inventory_icons/Risol/Risol_04_complaining.png',
+  risolAnnoyed: 'assets/chibi_inventory_icons/Risol/Risol_05_annoyed_arms_crossed.png',
+  risolCheck: 'assets/chibi_inventory_icons/Risol/Risol_06_clipboard_check.png',
   risolWarn: 'assets/chibi_inventory_icons/Risol/Risol_10_stop_warning.png',
   risolThink: 'assets/chibi_inventory_icons/Risol/Risol_07_thinking.png',
   risolBox: 'assets/chibi_inventory_icons/Risol/Risol_08_carrying_box.png',
+  risolShelf: 'assets/chibi_inventory_icons/Risol/Risol_11_stocking_shelf.png',
+  risolSupplies: 'assets/chibi_inventory_icons/Risol/Risol_12_holding_bottle_and_can.png',
   coupleCheck: 'assets/chibi_inventory_icons/Couple/Couple_01_clipboard_together.png',
+  coupleList: 'assets/chibi_inventory_icons/Couple/Couple_03_discussing_list.png',
+  coupleBasket: 'assets/chibi_inventory_icons/Couple/Couple_05_carrying_basket.png',
+};
+
+const CHARACTER_LINES = {
+  emptyStock: [
+    { speaker: 'arte', text: 'まずはよく使うものから、でどうかな', icon: CHAR.arteWave },
+    { speaker: 'arte', text: '目についたものを、少しずつ置いていきましょ。', icon: CHAR.arteGentle },
+    { speaker: 'risol', text: '最初は少なくていいよ。続かなかったら意味ないし。', icon: CHAR.risolArms },
+  ],
+  expiring: [
+    { speaker: 'risol', text: count => `期限が近いものが${count}件あるよ。早く補充したほうがいいんじゃない？`, icon: CHAR.risolWarn, tone: 'warn' },
+    { speaker: 'risol', text: count => `${count}件、期限が近い。見落としてたわけじゃないよね？`, icon: CHAR.risolComplain, tone: 'warn' },
+    { speaker: 'arte', text: count => `期限が近いものが${count}件あるみたい。今日のうちに見ておこっか。`, icon: CHAR.arteCheck, tone: 'warn' },
+  ],
+  lowStock: [
+    { speaker: 'risol', text: count => `在庫少なめが${count}件。あとで困ってもオレ知らないよ？`, icon: CHAR.risolThink, tone: 'warn' },
+    { speaker: 'risol', text: count => `${count}件、そろそろ補充したほうがいいんじゃない？`, icon: CHAR.risolAnnoyed, tone: 'warn' },
+    { speaker: 'arte', text: count => `少なくなってるものが${count}件あるね。買い物リストも見てみよ。`, icon: CHAR.arteBasket, tone: 'warn' },
+  ],
+  tidy: [
+    { speaker: 'arte', text: 'きれいに整ってるね。この調子で、のんびり続けましょ。', icon: CHAR.arteDone },
+    { speaker: 'arte', text: '今日のストック、とっても見やすいね。', icon: CHAR.arteHappy },
+    { speaker: 'risol', text: 'まあまあ整ってるじゃん。このまま崩さないでよね。', icon: CHAR.risolSmug },
+  ],
+  emptyAll: [
+    { speaker: 'arte', text: '目についたものからいっこずつ、ね', icon: CHAR.arteBox },
+    { speaker: 'arte', text: '最初のひとつ、わたしと一緒に登録しよ。', icon: CHAR.arteWave },
+    { speaker: 'risol', text: '空っぽだと管理も何もないでしょ。ひとつ入れよ。', icon: CHAR.risolBox },
+  ],
+  emptyCategory: [
+    { speaker: 'risol', text: 'ここは空っぽ。追加するなら今だよ？', icon: CHAR.risolBox },
+    { speaker: 'risol', text: 'この棚、まだ何もないね。別に寂しくはないけど。', icon: CHAR.risolArms },
+    { speaker: 'arte', text: 'この種類のもの、見つけたらここに置いておこうね。', icon: CHAR.arteSort },
+  ],
+  emptyShopping: [
+    { speaker: 'arte', text: '必要なものが出たら、わたしが一緒に確認するね', icon: CHAR.arteBasket },
+    { speaker: 'arte', text: '買うものがない日は、ちょっと安心だね。', icon: CHAR.arteHappy },
+    { speaker: 'risol', text: '今は買い物なし。余計なもの買わなくて済むじゃん。', icon: CHAR.risolSmug },
+  ],
+  idle: [
+    { speaker: 'arte', text: 'ひと休み中かな？無理しないでね。', icon: CHAR.arteGentle },
+    { speaker: 'risol', text: 'ちょっと、開いたまま忘れてない？', icon: CHAR.risolComplain },
+    { speaker: 'arte', text: '戻ってきたら、続きからで大丈夫だよ。', icon: CHAR.arteWave },
+  ],
+  return: [
+    { speaker: 'arte', text: 'おかえり。続き、見ていこっか。', icon: CHAR.arteWave },
+    { speaker: 'risol', text: '戻ってきたんだ。じゃ、確認するよ。', icon: CHAR.risolCheck },
+    { speaker: 'arte', text: 'また来てくれてうれしいな。', icon: CHAR.arteSmile },
+  ],
+  stockTab: [
+    { speaker: 'risol', text: '在庫チェックね。見落とし、ないように。', icon: CHAR.risolCheck },
+    { speaker: 'arte', text: '今あるものを、ゆっくり見ていこうね。', icon: CHAR.arteShelf },
+  ],
+  shoppingTab: [
+    { speaker: 'arte', text: '買い物リスト、一緒に確認するね。', icon: CHAR.arteBasket },
+    { speaker: 'risol', text: '買い忘れ、あとで言い訳しないでよ？', icon: CHAR.risolSupplies },
+  ],
+  settingsTab: [
+    { speaker: 'arte', text: '設定は焦らずで大丈夫だよ。', icon: CHAR.arteCheck },
+    { speaker: 'risol', text: '同期まわり、ちゃんと見といたほうがいいよ。', icon: CHAR.risolThink },
+  ],
 };
 
 // ─────────────────────────────────────────────
@@ -42,6 +116,10 @@ let driveTokenExpiresAt = 0;
 let driveTokenClient = null;
 let saveTimer       = null;
 let editingItemId   = null;
+let idleTimer       = null;
+let peekTimer       = null;
+let lastPeekAt      = 0;
+let wasAway         = false;
 
 // ─────────────────────────────────────────────
 //  状態の永続化
@@ -244,6 +322,19 @@ function esc(str) {
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function pick(list) {
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+function lineText(line, value) {
+  return typeof line.text === 'function' ? line.text(value) : line.text;
+}
+
+function lineFor(key, value) {
+  const line = pick(CHARACTER_LINES[key]);
+  return { ...line, text: lineText(line, value) };
+}
+
 function showToast(msg, isError = false) {
   const el = $('toast');
   const speaker = isError ? 'risol' : 'arte';
@@ -276,15 +367,11 @@ function renderCharacterTip() {
     const d = daysUntil(i.expiryDate);
     return d !== null && d <= 3;
   }).length;
-  if (!state.items.length) {
-    el.innerHTML = characterLine('arte', 'まずはよく使うものから、ゆっくり登録していきましょうね。', CHAR.arteWave);
-  } else if (expiryCount) {
-    el.innerHTML = characterLine('risol', `期限が近いものが${expiryCount}件あるぞ。べ、別に心配してるわけじゃないからな。`, CHAR.risolWarn, 'warn');
-  } else if (lowCount) {
-    el.innerHTML = characterLine('risol', `在庫少なめが${lowCount}件だ。買い忘れたら困るだろ、早めに見とけよ。`, CHAR.risolThink, 'warn');
-  } else {
-    el.innerHTML = characterLine('arte', 'きれいに整っていますね。この調子で、のんびり続けましょう。', CHAR.arteDone);
-  }
+  const line = !state.items.length ? lineFor('emptyStock')
+    : expiryCount ? lineFor('expiring', expiryCount)
+    : lowCount ? lineFor('lowStock', lowCount)
+    : lineFor('tidy');
+  el.innerHTML = characterLine(line.speaker, line.text, line.icon, line.tone || '');
 }
 
 function updateSyncIcon(status) {
@@ -319,7 +406,6 @@ function syncAutoShoppingItems() {
 //  レンダリング
 // ─────────────────────────────────────────────
 function renderAll() {
-  renderCharacterTip();
   if (currentTab === 'stock')    renderStock();
   if (currentTab === 'shopping') renderShopping();
   if (currentTab === 'settings') renderSettings();
@@ -343,11 +429,12 @@ function renderStock() {
   });
 
   if (!items.length) {
+    const emptyLine = currentCategory === 'all' ? lineFor('emptyAll') : lineFor('emptyCategory');
     list.innerHTML = `
       <div class="empty-state character-empty">
-        <img class="empty-character" src="${currentCategory === 'all' ? CHAR.arteBox : CHAR.risolBox}" alt="">
+        <img class="empty-character" src="${emptyLine.icon}" alt="">
         <p>${currentCategory === 'all' ? 'まだ品目がありません' : 'この種類の品目はありません'}</p>
-        <p class="empty-hint">${currentCategory === 'all' ? 'アーテ「ひとつずつ、登録していきましょうね」' : 'リソル「ここは空っぽだな。追加するなら今だぞ」'}</p>
+        <p class="empty-hint">${emptyLine.speaker === 'risol' ? 'リソル' : 'アーテ'}「${esc(emptyLine.text)}」</p>
       </div>`;
     return;
   }
@@ -357,6 +444,9 @@ function renderStock() {
     const expCl = expiryClass(item.expiryDate);
     const expLb = expiryLabel(item.expiryDate);
     const isLow = item.minQuantity > 0 && item.quantity <= item.minQuantity;
+    const alertIcon = expCl === 'expired' || expCl === 'expiring-soon'
+      ? pick([CHAR.risolWarn, CHAR.risolComplain, CHAR.arteCheck])
+      : isLow ? pick([CHAR.risolThink, CHAR.risolAnnoyed, CHAR.arteBasket]) : '';
     return `
       <div class="item-card cat-${cat.id} ${expCl} ${isLow ? 'low-stock' : ''}" data-id="${item.id}">
         <div class="item-cat-icon">${cat.icon}</div>
@@ -366,7 +456,7 @@ function renderStock() {
           ${item.note ? `<div class="item-note">${esc(item.note)}</div>` : ''}
           ${isLow ? `<div class="item-low">⚠️ 在庫少（最小${item.minQuantity}${esc(item.unit)}）</div>` : ''}
         </div>
-        ${(isLow || expCl === 'expired' || expCl === 'expiring-soon') ? `<img class="item-alert-character" src="${CHAR.risolWarn}" alt="">` : ''}
+        ${alertIcon ? `<img class="item-alert-character" src="${alertIcon}" alt="">` : ''}
         <div class="item-qty-ctrl">
           <button class="qty-btn" onclick="changeQty('${item.id}',-1)">−</button>
           <span class="qty-value">${item.quantity}<span class="qty-unit">${esc(item.unit)}</span></span>
@@ -384,11 +474,12 @@ function renderShopping() {
   if (!list) return;
 
   if (!state.shoppingList.length) {
+    const emptyLine = lineFor('emptyShopping');
     list.innerHTML = `
       <div class="empty-state character-empty">
-        <img class="empty-character" src="${CHAR.arteBasket}" alt="">
+        <img class="empty-character" src="${emptyLine.icon}" alt="">
         <p>買い物リストは空です</p>
-        <p class="empty-hint">アーテ「必要なものが出たら、わたしが一緒に確認しますね」</p>
+        <p class="empty-hint">${emptyLine.speaker === 'risol' ? 'リソル' : 'アーテ'}「${esc(emptyLine.text)}」</p>
       </div>`;
     return;
   }
@@ -442,6 +533,8 @@ function switchTab(tab) {
   if (shoppingFab) shoppingFab.classList.toggle('hidden', tab !== 'shopping');
 
   renderAll();
+  const lineKey = { stock: 'stockTab', shopping: 'shoppingTab', settings: 'settingsTab' }[tab];
+  if (lineKey) showCharacterPeek(lineFor(lineKey));
 }
 
 function switchCategory(cat) {
@@ -622,6 +715,77 @@ function updateShoppingBadge() {
 }
 
 // ─────────────────────────────────────────────
+//  キャラクターのひょっこり演出
+// ─────────────────────────────────────────────
+function showCharacterPeek(line, force = false) {
+  const el = $('characterPeek');
+  if (!el || !line) return;
+  const now = Date.now();
+  if (!force && now - lastPeekAt < 18000) return;
+  lastPeekAt = now;
+  clearTimeout(peekTimer);
+  el.innerHTML = `
+    <img class="peek-avatar" src="${line.icon}" alt="">
+    <div class="peek-bubble">
+      <span>${line.speaker === 'risol' ? 'リソル' : 'アーテ'}</span>
+      <p>${esc(line.text)}</p>
+    </div>`;
+  el.className = `character-peek show ${line.speaker}`;
+  Object.assign(el.style, {
+    position: 'fixed',
+    top: `${Math.max(310, window.innerHeight - 170)}px`,
+    bottom: 'auto',
+    left: `${Math.max(10, (window.innerWidth - 540) / 2 + 10)}px`,
+    zIndex: '99999',
+    opacity: '1',
+    marginLeft: '0',
+  });
+  setTimeout(() => {
+    el.style.left = `${Math.max(10, (window.innerWidth - 540) / 2 + 10)}px`;
+  }, 40);
+  peekTimer = setTimeout(() => {
+    el.classList.remove('show');
+    el.style.opacity = '0';
+    el.style.marginLeft = '-350px';
+  }, 5200);
+}
+
+function resetIdleTimer() {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    if (!document.hidden && !document.querySelector('.modal-overlay.open')) {
+      showCharacterPeek(lineFor('idle'));
+    }
+  }, 45000);
+}
+
+function setupCharacterPeek() {
+  ['click', 'keydown', 'pointerdown', 'scroll', 'touchstart'].forEach(eventName => {
+    document.addEventListener(eventName, resetIdleTimer, { passive: true });
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      wasAway = true;
+      return;
+    }
+    resetIdleTimer();
+    if (wasAway) {
+      wasAway = false;
+      showCharacterPeek(lineFor('return'), true);
+    }
+  });
+  window.addEventListener('blur', () => { wasAway = true; });
+  window.addEventListener('focus', () => {
+    resetIdleTimer();
+    if (wasAway) {
+      wasAway = false;
+      showCharacterPeek(lineFor('return'), true);
+    }
+  });
+  resetIdleTimer();
+}
+
+// ─────────────────────────────────────────────
 //  モーダル
 // ─────────────────────────────────────────────
 function openModal(id)  {
@@ -717,6 +881,7 @@ function init() {
 
   // 同期ボタン
   $('syncBtn')?.addEventListener('click', syncNow);
+  setupCharacterPeek();
 
   // 初期バッジ
   updateShoppingBadge();

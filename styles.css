@@ -168,32 +168,6 @@ select:focus-visible {
   filter: drop-shadow(0 12px 18px rgba(72,45,69,0.22));
   animation: bob 3.4s ease-in-out infinite;
 }
-.hero-bubble {
-  position: absolute;
-  z-index: 3;
-  max-width: 118px;
-  padding: 5px 8px;
-  border: 2px solid rgba(255,255,255,0.9);
-  border-radius: 14px;
-  background: rgba(255,255,255,0.9);
-  color: var(--ink);
-  font-size: 0.68rem;
-  font-weight: 900;
-  line-height: 1.25;
-  box-shadow: 0 8px 16px rgba(92,54,82,0.14);
-}
-.hero-risol {
-  left: -18px;
-  top: 0;
-  color: #5a3ec6;
-  transform: rotate(-5deg);
-}
-.hero-arte {
-  right: -12px;
-  bottom: 2px;
-  color: var(--pink-dark);
-  transform: rotate(4deg);
-}
 .sparkle {
   position: absolute;
   color: #fff;
@@ -998,6 +972,83 @@ select:focus-visible {
 }
 .toast.error { background: var(--red); }
 
+/* ─── Character peek ─── */
+.character-peek {
+  position: fixed;
+  left: max(10px, calc((100vw - 540px) / 2 + 10px));
+  top: calc(100dvh - 170px - env(safe-area-inset-bottom));
+  bottom: auto;
+  z-index: 99999;
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  align-items: end;
+  width: min(330px, calc(100vw - 28px));
+  pointer-events: none;
+  background: rgba(255,255,255,0.16);
+  border-radius: 8px;
+  opacity: 0;
+  margin-left: -350px;
+  will-change: opacity, margin-left;
+  transition: opacity 0.24s, margin-left 0.34s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.character-peek.show {
+  opacity: 1;
+  margin-left: 0;
+}
+.peek-avatar {
+  position: relative;
+  z-index: 2;
+  width: 78px;
+  height: 78px;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 14px rgba(64,42,58,0.2));
+  animation: peek-wave 2.8s ease-in-out infinite;
+}
+.peek-bubble {
+  position: relative;
+  min-width: 0;
+  margin-left: -2px;
+  margin-bottom: 10px;
+  padding: 9px 12px;
+  border: 2px solid rgba(255,255,255,0.95);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.94);
+  box-shadow: var(--shadow);
+}
+.peek-bubble::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  bottom: 19px;
+  width: 14px;
+  height: 14px;
+  background: rgba(255,255,255,0.94);
+  border-left: 2px solid rgba(255,255,255,0.95);
+  border-bottom: 2px solid rgba(255,255,255,0.95);
+  transform: rotate(45deg);
+}
+.peek-bubble span {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--pink-dark);
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+.character-peek.risol .peek-bubble span {
+  color: #5a3ec6;
+}
+.peek-bubble p {
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+@keyframes peek-wave {
+  0%, 100% { transform: translateY(0) rotate(-1deg); }
+  50% { transform: translateY(-4px) rotate(2deg); }
+}
+
 @media (max-width: 540px) {
   .app-header {
     grid-template-columns: minmax(0, 1fr) 34px;
@@ -1056,19 +1107,6 @@ select:focus-visible {
     inset: 20px -10px -16px 0;
     background: rgba(255,255,255,0.22);
   }
-  .hero-bubble {
-    max-width: 122px;
-    padding: 5px 8px;
-    font-size: 0.68rem;
-  }
-  .hero-risol {
-    left: -20px;
-    top: 4px;
-  }
-  .hero-arte {
-    right: -2px;
-    bottom: 12px;
-  }
   #syncBtn {
     width: 34px;
     height: 34px;
@@ -1119,17 +1157,6 @@ select:focus-visible {
     right: -8px;
     width: 182px;
     height: 154px;
-  }
-  .hero-bubble {
-    max-width: 112px;
-    font-size: 0.64rem;
-  }
-  .hero-risol {
-    left: -12px;
-  }
-  .hero-arte {
-    right: 4px;
-    bottom: 10px;
   }
   .floating-leaf {
     right: 14px;
