@@ -309,7 +309,7 @@ function renderStock() {
     const expLb = expiryLabel(item.expiryDate);
     const isLow = item.minQuantity > 0 && item.quantity <= item.minQuantity;
     return `
-      <div class="item-card ${expCl}" data-id="${item.id}">
+      <div class="item-card cat-${cat.id} ${expCl}" data-id="${item.id}">
         <div class="item-cat-icon">${cat.icon}</div>
         <div class="item-body">
           <div class="item-name">${esc(item.name)}</div>
