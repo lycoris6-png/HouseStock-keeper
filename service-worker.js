@@ -1,4 +1,4 @@
-const CACHE_NAME = "household-stock-v4";
+const CACHE_NAME = "household-stock-v5";
 const STATIC_ASSETS = [
   "./",
   "./index.html",

@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>家庭在庫ノート</title>
+  <title>ストックノート</title>
   <meta name="theme-color" content="#ff7aa8">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="在庫ノート">
+  <meta name="apple-mobile-web-app-title" content="ストックノート">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png">
   <link rel="apple-touch-icon" href="assets/icons/icon-192.png">
@@ -23,10 +23,10 @@
   <header class="app-header">
     <div class="header-copy">
       <p class="header-kicker">おうちのストックを、たのしく整える</p>
-      <h1><span>家庭在庫</span><span>ノート</span></h1>
+      <h1>ストックノート</h1>
       <div class="header-pills" aria-hidden="true">
         <span>冷蔵庫</span>
-        <span>日用品</span>
+        <span>日用雑貨</span>
         <span>買い物</span>
       </div>
     </div>
@@ -45,6 +45,11 @@
   <div class="tab-content active" data-tab="stock">
     <!-- カテゴリチップ -->
     <div id="catChips" class="cat-chips"></div>
+    <div id="subcatChips" class="subcat-chips"></div>
+    <div class="stock-toolbar">
+      <label for="sortSelect">並び替え</label>
+      <select id="sortSelect"></select>
+    </div>
     <section id="characterTip" class="character-tip" aria-live="polite"></section>
     <!-- 品目リスト -->
     <div id="stockList" class="stock-list"></div>
@@ -91,7 +96,7 @@
     <div class="settings-section">
       <h2>📊 データ情報</h2>
       <div class="settings-row">
-        <p class="hint">データは端末の localStorage に保存され、Drive 接続後は自動でクラウドに同期されます。</p>
+        <p class="hint">データは端末の localStorage に保存されます。Drive へ保存したい時だけ、下のボタンから手動で同期してください。</p>
       </div>
       <div class="settings-row">
         <button class="btn-secondary" onclick="syncNow()">今すぐ Drive に保存</button>
@@ -138,13 +143,11 @@
       </div>
       <div class="form-row">
         <label for="itemCategory">カテゴリ</label>
-        <select id="itemCategory">
-          <option value="refrigerator">🧊 冷蔵庫</option>
-          <option value="pantry">🏠 常温</option>
-          <option value="bathroom">🚿 水回り</option>
-          <option value="medicine">💊 薬</option>
-          <option value="other">📦 その他</option>
-        </select>
+        <select id="itemCategory"></select>
+      </div>
+      <div class="form-row">
+        <label for="itemSubcategory">小分類</label>
+        <select id="itemSubcategory"></select>
       </div>
       <div class="form-row-2">
         <div class="form-row">
@@ -160,9 +163,18 @@
         <label for="itemMinQty">最小在庫数（これ以下で買い物リストへ）</label>
         <input type="number" id="itemMinQty" min="0" step="0.5" value="1">
       </div>
-      <div class="form-row">
-        <label for="itemExpiry">賞味・使用期限</label>
-        <input type="date" id="itemExpiry">
+      <div class="form-row-2">
+        <div class="form-row">
+          <label for="itemDateType">日付の種類</label>
+          <select id="itemDateType">
+            <option value="expiry">消費期限</option>
+            <option value="start">使用開始日時</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label for="itemExpiry" id="itemDateLabel">消費期限</label>
+          <input type="date" id="itemExpiry">
+        </div>
       </div>
       <div class="form-row">
         <label for="itemNote">メモ</label>

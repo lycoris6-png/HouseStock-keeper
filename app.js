@@ -6,15 +6,52 @@
 const STORAGE_KEY    = 'household-stock-v1';
 const DRIVE_FILE_NAME = 'household-stock-data.json';
 const DRIVE_SCOPE    = 'https://www.googleapis.com/auth/drive.file';
-const SAVE_DEBOUNCE  = 2500; // ms
-
 const CATEGORIES = [
   { id: 'all',          label: 'すべて', icon: '📋' },
   { id: 'refrigerator', label: '冷蔵庫', icon: '🧊' },
   { id: 'pantry',       label: '常温',   icon: '🏠' },
-  { id: 'bathroom',     label: '水回り', icon: '🚿' },
+  { id: 'daily',        label: '日用雑貨', icon: '🧺' },
   { id: 'medicine',     label: '薬',     icon: '💊' },
   { id: 'other',        label: 'その他', icon: '📦' },
+];
+
+const SUBCATEGORIES = {
+  refrigerator: [
+    { id: 'chilled', label: '冷蔵', icon: '🥛' },
+    { id: 'frozen',  label: '冷凍', icon: '🧊' },
+    { id: 'fresh',   label: '生鮮', icon: '🥬' },
+    { id: 'drink',   label: '飲み物', icon: '🧃' },
+  ],
+  pantry: [
+    { id: 'food',      label: '食品', icon: '🍚' },
+    { id: 'seasoning', label: '調味料', icon: '🧂' },
+    { id: 'snack',     label: 'おやつ', icon: '🍪' },
+    { id: 'drink',     label: '飲み物', icon: '☕' },
+  ],
+  daily: [
+    { id: 'paper',    label: '紙類', icon: '🧻' },
+    { id: 'cleaning', label: '掃除', icon: '🧽' },
+    { id: 'hygiene',  label: '衛生', icon: '🪥' },
+    { id: 'bath',     label: 'バス', icon: '🧴' },
+  ],
+  medicine: [
+    { id: 'medicine', label: '薬', icon: '💊' },
+    { id: 'firstaid', label: '救急', icon: '🩹' },
+    { id: 'care',     label: 'ケア用品', icon: '🌡️' },
+  ],
+  other: [
+    { id: 'stock', label: '備品', icon: '📦' },
+    { id: 'pet',   label: 'ペット', icon: '🐾' },
+    { id: 'other', label: 'その他', icon: '✨' },
+  ],
+};
+
+const SORT_OPTIONS = [
+  { id: 'priority', label: '期限・在庫優先' },
+  { id: 'name',     label: '名前順' },
+  { id: 'quantity', label: '在庫少ない順' },
+  { id: 'category', label: '分類順' },
+  { id: 'date',     label: '日付順' },
 ];
 
 const UNITS = ['個', '本', '袋', '缶', '箱', '枚', 'セット', 'パック', 'g', 'kg', 'ml', 'L', '冊', '錠', '包'];
@@ -111,6 +148,8 @@ const CHARACTER_LINES = {
 let state           = loadState();
 let currentTab      = 'stock';
 let currentCategory = 'all';
+let currentSubcategory = 'all';
+let currentSort = 'priority';
 let driveToken      = null;
 let driveTokenExpiresAt = 0;
 let driveTokenClient = null;
@@ -140,6 +179,7 @@ function loadState() {
     if (!s.settings)      s.settings = { driveClientId: '', driveFileId: null };
     if (!s.shoppingList)  s.shoppingList = [];
     if (!s.items)         s.items = [];
+    s.items.forEach(normalizeItem);
     return s;
   } catch {
     return createInitialState();
@@ -152,7 +192,6 @@ function persistLocal() {
 
 function saveState() {
   persistLocal();
-  scheduleDriveSave();
 }
 
 // ─────────────────────────────────────────────
@@ -224,6 +263,7 @@ async function loadFromDrive() {
     const data = await res.json();
     state.items        = data.items        || [];
     state.shoppingList = data.shoppingList || [];
+    state.items.forEach(normalizeItem);
     persistLocal();
     renderAll();
     showToast('☁️ Driveから読み込みました');
@@ -272,9 +312,7 @@ async function saveToDrive() {
 
 function scheduleDriveSave() {
   if (!state.settings.driveClientId) return;
-  clearTimeout(saveTimer);
-  updateSyncIcon('pending');
-  saveTimer = setTimeout(() => saveToDrive(), SAVE_DEBOUNCE);
+  updateSyncIcon('saved');
 }
 
 // ─────────────────────────────────────────────
@@ -312,7 +350,54 @@ function expiryLabel(dateStr) {
 }
 
 function catInfo(id) {
-  return CATEGORIES.find(c => c.id === id) || CATEGORIES[CATEGORIES.length - 1];
+  const normalized = id === 'bathroom' ? 'daily' : id;
+  return CATEGORIES.find(c => c.id === normalized) || CATEGORIES[CATEGORIES.length - 1];
+}
+
+function subcategoryList(category) {
+  return SUBCATEGORIES[catInfo(category).id] || SUBCATEGORIES.other;
+}
+
+function defaultSubcategory(category) {
+  return subcategoryList(category)[0]?.id || 'other';
+}
+
+function subcatInfo(category, subcategory) {
+  return subcategoryList(category).find(s => s.id === subcategory) || subcategoryList(category)[0] || { id: 'other', label: 'その他', icon: '✨' };
+}
+
+function normalizeItem(item) {
+  if (!item) return item;
+  if (item.category === 'bathroom') item.category = 'daily';
+  if (!item.category) item.category = 'other';
+  item.category = catInfo(item.category).id;
+  if (!item.subcategory) item.subcategory = defaultSubcategory(item.category);
+  if (item.category === 'daily' && item.subcategory === 'other') item.subcategory = 'bath';
+  if (!item.dateType) item.dateType = 'expiry';
+  if (item.dateType !== 'start') item.dateType = 'expiry';
+  return item;
+}
+
+function itemDate(item) {
+  return item.expiryDate || item.date || null;
+}
+
+function itemDateClass(item) {
+  if (!itemDate(item) || item.dateType === 'start') return '';
+  return expiryClass(itemDate(item));
+}
+
+function itemDateLabel(item) {
+  const date = itemDate(item);
+  if (!date) return '';
+  if (item.dateType === 'start') {
+    const d = daysUntil(date);
+    if (d === null) return '';
+    if (d === 0) return '今日から使用';
+    if (d < 0) return `使用開始から${Math.abs(d)}日`;
+    return `使用開始予定: あと${d}日`;
+  }
+  return expiryLabel(date);
 }
 
 function $(id)  { return document.getElementById(id); }
@@ -341,7 +426,6 @@ function showToast(msg, isError = false) {
   const icon = isError ? CHAR.risolWarn : CHAR.arteDone;
   el.innerHTML = `
     <img class="toast-avatar" src="${icon}" alt="">
-    <span class="toast-speaker">${speaker === 'risol' ? 'リソル' : 'アーテ'}</span>
     <span class="toast-message">${esc(msg)}</span>`;
   el.className = `toast show ${speaker}` + (isError ? ' error' : '');
   clearTimeout(el._t);
@@ -353,7 +437,6 @@ function characterLine(speaker, text, icon, tone = '') {
     <div class="character-tip-inner ${speaker} ${tone}">
       <img class="character-avatar" src="${icon}" alt="">
       <div class="speech">
-        <span class="speaker-name">${speaker === 'risol' ? 'リソル' : 'アーテ'}</span>
         <p>${esc(text)}</p>
       </div>
     </div>`;
@@ -411,22 +494,58 @@ function renderAll() {
   if (currentTab === 'settings') renderSettings();
 }
 
+function compareItems(a, b) {
+  const lowA = a.minQuantity > 0 && a.quantity <= a.minQuantity ? 0 : 1;
+  const lowB = b.minQuantity > 0 && b.quantity <= b.minQuantity ? 0 : 1;
+  const dateA = daysUntil(a.dateType === 'start' ? null : itemDate(a)) ?? 9999;
+  const dateB = daysUntil(b.dateType === 'start' ? null : itemDate(b)) ?? 9999;
+  if (currentSort === 'name') return a.name.localeCompare(b.name, 'ja');
+  if (currentSort === 'quantity') return (a.quantity - b.quantity) || a.name.localeCompare(b.name, 'ja');
+  if (currentSort === 'category') {
+    return catInfo(a.category).label.localeCompare(catInfo(b.category).label, 'ja')
+      || subcatInfo(a.category, a.subcategory).label.localeCompare(subcatInfo(b.category, b.subcategory).label, 'ja')
+      || a.name.localeCompare(b.name, 'ja');
+  }
+  if (currentSort === 'date') {
+    const rawA = itemDate(a) || '9999-12-31';
+    const rawB = itemDate(b) || '9999-12-31';
+    return rawA.localeCompare(rawB) || a.name.localeCompare(b.name, 'ja');
+  }
+  return dateA - dateB || lowA - lowB || a.name.localeCompare(b.name, 'ja');
+}
+
+function renderSubcategoryChips() {
+  const chips = $('subcatChips');
+  if (!chips) return;
+  if (currentCategory === 'all') {
+    chips.innerHTML = '';
+    chips.classList.add('hidden');
+    currentSubcategory = 'all';
+    return;
+  }
+  chips.classList.remove('hidden');
+  const options = [{ id: 'all', label: 'すべて', icon: '✨' }, ...subcategoryList(currentCategory)];
+  chips.innerHTML = options.map(s =>
+    `<button class="subcat-chip ${s.id === currentSubcategory ? 'active' : ''}" data-subcat="${s.id}"
+       onclick="switchSubcategory('${s.id}')">${s.icon} ${s.label}</button>`
+  ).join('');
+}
+
 /* ── 在庫一覧 ── */
 function renderStock() {
   renderCharacterTip();
+  renderSubcategoryChips();
   const list = $('stockList');
   if (!list) return;
 
   let items = currentCategory === 'all'
     ? [...state.items]
     : state.items.filter(i => i.category === currentCategory);
+  if (currentSubcategory !== 'all') {
+    items = items.filter(i => i.subcategory === currentSubcategory);
+  }
 
-  // ソート：期限切れ→期限近い→在庫少→名前順
-  items.sort((a, b) => {
-    const da = daysUntil(a.expiryDate) ?? 9999;
-    const db = daysUntil(b.expiryDate) ?? 9999;
-    return da - db || a.name.localeCompare(b.name, 'ja');
-  });
+  items.sort(compareItems);
 
   if (!items.length) {
     const emptyLine = currentCategory === 'all' ? lineFor('emptyAll') : lineFor('emptyCategory');
@@ -434,15 +553,16 @@ function renderStock() {
       <div class="empty-state character-empty">
         <img class="empty-character" src="${emptyLine.icon}" alt="">
         <p>${currentCategory === 'all' ? 'まだ品目がありません' : 'この種類の品目はありません'}</p>
-        <p class="empty-hint">${emptyLine.speaker === 'risol' ? 'リソル' : 'アーテ'}「${esc(emptyLine.text)}」</p>
+        <p class="empty-hint">${esc(emptyLine.text)}</p>
       </div>`;
     return;
   }
 
   list.innerHTML = items.map(item => {
     const cat   = catInfo(item.category);
-    const expCl = expiryClass(item.expiryDate);
-    const expLb = expiryLabel(item.expiryDate);
+    const subcat = subcatInfo(item.category, item.subcategory);
+    const expCl = itemDateClass(item);
+    const expLb = itemDateLabel(item);
     const isLow = item.minQuantity > 0 && item.quantity <= item.minQuantity;
     const alertIcon = expCl === 'expired' || expCl === 'expiring-soon'
       ? pick([CHAR.risolWarn, CHAR.risolComplain, CHAR.arteCheck])
@@ -452,6 +572,7 @@ function renderStock() {
         <div class="item-cat-icon">${cat.icon}</div>
         <div class="item-body">
           <div class="item-name">${esc(item.name)}</div>
+          <div class="item-subcat">${subcat.icon} ${esc(subcat.label)}</div>
           ${expLb ? `<div class="item-expiry ${expCl}">${expLb}</div>` : ''}
           ${item.note ? `<div class="item-note">${esc(item.note)}</div>` : ''}
           ${isLow ? `<div class="item-low">⚠️ 在庫少（最小${item.minQuantity}${esc(item.unit)}）</div>` : ''}
@@ -479,7 +600,7 @@ function renderShopping() {
       <div class="empty-state character-empty">
         <img class="empty-character" src="${emptyLine.icon}" alt="">
         <p>買い物リストは空です</p>
-        <p class="empty-hint">${emptyLine.speaker === 'risol' ? 'リソル' : 'アーテ'}「${esc(emptyLine.text)}」</p>
+        <p class="empty-hint">${esc(emptyLine.text)}</p>
       </div>`;
     return;
   }
@@ -539,8 +660,35 @@ function switchTab(tab) {
 
 function switchCategory(cat) {
   currentCategory = cat;
+  currentSubcategory = 'all';
   document.querySelectorAll('.cat-chip').forEach(c => c.classList.toggle('active', c.dataset.cat === cat));
   renderStock();
+}
+
+function switchSubcategory(subcat) {
+  currentSubcategory = subcat;
+  document.querySelectorAll('.subcat-chip').forEach(c => c.classList.toggle('active', c.dataset.subcat === subcat));
+  renderStock();
+}
+
+function switchSort(sort) {
+  currentSort = sort;
+  renderStock();
+}
+
+function updateSubcategorySelect(category) {
+  const sel = $('itemSubcategory');
+  if (!sel) return;
+  sel.innerHTML = subcategoryList(category).map(s => `<option value="${s.id}">${s.icon} ${s.label}</option>`).join('');
+}
+
+function updateDateTypeLabel() {
+  const label = $('itemDateLabel');
+  const input = $('itemExpiry');
+  if (!label) return;
+  const isStart = $('itemDateType')?.value === 'start';
+  label.textContent = isStart ? '使用開始日時' : '消費期限';
+  if (input) input.type = isStart ? 'datetime-local' : 'date';
 }
 
 // ─────────────────────────────────────────────
@@ -562,9 +710,13 @@ function openAddItem() {
   $('modalTitle').textContent = '品目を追加';
   $('itemName').value     = '';
   $('itemCategory').value = currentCategory !== 'all' ? currentCategory : 'refrigerator';
+  updateSubcategorySelect($('itemCategory').value);
+  $('itemSubcategory').value = currentSubcategory !== 'all' ? currentSubcategory : defaultSubcategory($('itemCategory').value);
   $('itemQty').value      = '1';
   $('itemUnit').value     = '個';
   $('itemMinQty').value   = '1';
+  $('itemDateType').value = 'expiry';
+  updateDateTypeLabel();
   $('itemExpiry').value   = '';
   $('itemNote').value     = '';
   $('deleteItemBtn').classList.add('hidden');
@@ -579,10 +731,15 @@ function openEditItem(itemId) {
   $('modalTitle').textContent = '品目を編集';
   $('itemName').value     = item.name;
   $('itemCategory').value = item.category;
+  updateSubcategorySelect(item.category);
+  $('itemSubcategory').value = item.subcategory || defaultSubcategory(item.category);
   $('itemQty').value      = item.quantity;
   $('itemUnit').value     = item.unit;
   $('itemMinQty').value   = item.minQuantity;
-  $('itemExpiry').value   = item.expiryDate || '';
+  $('itemDateType').value = item.dateType || 'expiry';
+  updateDateTypeLabel();
+  const dateValue = itemDate(item) || '';
+  $('itemExpiry').value   = item.dateType === 'start' && dateValue.length === 10 ? `${dateValue}T00:00` : dateValue;
   $('itemNote').value     = item.note || '';
   $('deleteItemBtn').classList.remove('hidden');
   openModal('itemModal');
@@ -601,9 +758,11 @@ function saveItem() {
     if (item) {
       item.name        = name;
       item.category    = $('itemCategory').value;
+      item.subcategory = $('itemSubcategory').value || defaultSubcategory(item.category);
       item.quantity    = qty;
       item.unit        = $('itemUnit').value;
       item.minQuantity = minQty;
+      item.dateType    = $('itemDateType').value;
       item.expiryDate  = $('itemExpiry').value || null;
       item.note        = $('itemNote').value.trim();
       item.updatedAt   = now;
@@ -612,9 +771,11 @@ function saveItem() {
     state.items.push({
       id: uid(), name,
       category:    $('itemCategory').value,
+      subcategory: $('itemSubcategory').value || defaultSubcategory($('itemCategory').value),
       quantity:    qty,
       unit:        $('itemUnit').value,
       minQuantity: minQty,
+      dateType:    $('itemDateType').value,
       expiryDate:  $('itemExpiry').value || null,
       note:        $('itemNote').value.trim(),
       createdAt:   now,
@@ -727,7 +888,6 @@ function showCharacterPeek(line, force = false) {
   el.innerHTML = `
     <img class="peek-avatar" src="${line.icon}" alt="">
     <div class="peek-bubble">
-      <span>${line.speaker === 'risol' ? 'リソル' : 'アーテ'}</span>
       <p>${esc(line.text)}</p>
     </div>`;
   el.className = `character-peek show ${line.speaker}`;
@@ -868,6 +1028,26 @@ function init() {
          onclick="switchCategory('${c.id}')">${c.icon} ${c.label}</button>`
     ).join('');
   }
+
+  const sortSelect = $('sortSelect');
+  if (sortSelect) {
+    sortSelect.innerHTML = SORT_OPTIONS.map(o => `<option value="${o.id}">${o.label}</option>`).join('');
+    sortSelect.value = currentSort;
+    sortSelect.addEventListener('change', () => switchSort(sortSelect.value));
+  }
+
+  const itemCategory = $('itemCategory');
+  if (itemCategory) {
+    itemCategory.innerHTML = CATEGORIES.filter(c => c.id !== 'all')
+      .map(c => `<option value="${c.id}">${c.icon} ${c.label}</option>`).join('');
+    itemCategory.addEventListener('change', () => {
+      updateSubcategorySelect(itemCategory.value);
+      $('itemSubcategory').value = defaultSubcategory(itemCategory.value);
+    });
+    updateSubcategorySelect(itemCategory.value || 'refrigerator');
+  }
+
+  $('itemDateType')?.addEventListener('change', updateDateTypeLabel);
 
   // ユニット選択肢を生成
   document.querySelectorAll('.unit-select').forEach(sel => {
