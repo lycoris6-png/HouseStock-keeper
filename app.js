@@ -724,6 +724,13 @@ function updateStockModeFields() {
   const mode = $('itemStockMode')?.value || 'count';
   $('itemAmountRow')?.classList.toggle('hidden', mode !== 'amount');
   $('itemMinAmountRow')?.classList.toggle('hidden', mode !== 'amount');
+  // 残量モードに切り替えたとき、最小在庫数の初期値を0にする
+  if (mode === 'amount') {
+    const minQtyEl = $('itemMinQty');
+    if (minQtyEl && (minQtyEl.value === '' || Number(minQtyEl.value) === 1)) {
+      minQtyEl.value = '0';
+    }
+  }
 }
 
 // ─────────────────────────────────────────────
