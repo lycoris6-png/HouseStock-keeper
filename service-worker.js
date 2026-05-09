@@ -1,10 +1,11 @@
-const CACHE_NAME = "household-stock-v5";
+const CACHE_NAME = "household-stock-v6";
 const STATIC_ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
   "./manifest.webmanifest",
+  "./assets/fonts/craftmincho.otf",
   "./assets/icons/favicon-32.png",
   "./assets/icons/icon-192.png",
   "./assets/icons/icon-512.png",

@@ -1,4 +1,8 @@
-@import url('https://fonts.googleapis.com/css2?family=Kiwi+Maru:wght@500;700&family=M+PLUS+Rounded+1c:wght@500;700;800;900&display=swap');
+@font-face {
+  font-family: "CraftMincho";
+  src: url("assets/fonts/craftmincho.otf") format("opentype");
+  font-display: swap;
+}
 
 :root {
   color-scheme: light;
@@ -54,7 +58,7 @@ select:focus-visible {
 .app-shell {
   display: flex;
   flex-direction: column;
-  height: 100dvh;
+  min-height: 100dvh;
   max-width: 540px;
   margin: 0 auto;
   position: relative;
@@ -63,18 +67,17 @@ select:focus-visible {
 /* ─── Header ─── */
 .app-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 156px 38px;
+  grid-template-columns: minmax(0, 1fr) 126px 38px;
   align-items: center;
   gap: 12px;
-  min-height: 176px;
-  padding: calc(18px + env(safe-area-inset-top)) 16px 18px;
+  min-height: 132px;
+  padding: calc(16px + env(safe-area-inset-top)) 16px 14px;
   background:
     linear-gradient(135deg, rgba(255,255,255,0.34), transparent 34%),
     linear-gradient(135deg, #ff7aa8 0%, #ffd166 52%, #65b9ff 100%);
   color: #fff;
   flex-shrink: 0;
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 10;
   overflow: hidden;
   box-shadow: 0 10px 28px rgba(255,122,168,0.26);
@@ -100,8 +103,8 @@ select:focus-visible {
 }
 
 .app-header h1 {
-  font-family: "Kiwi Maru", "M PLUS Rounded 1c", system-ui, sans-serif;
-  font-size: clamp(1.5rem, 6vw, 2rem);
+  font-family: "CraftMincho", "M PLUS Rounded 1c", "Hiragino Mincho ProN", serif;
+  font-size: clamp(1.65rem, 6.4vw, 2.18rem);
   font-weight: 900;
   line-height: 1.08;
   letter-spacing: 0;
@@ -115,40 +118,25 @@ select:focus-visible {
   min-width: 0;
 }
 .header-kicker {
-  display: inline-flex;
+  display: block;
   max-width: 100%;
-  margin-bottom: 8px;
-  padding: 4px 9px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.28);
+  margin-top: 6px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
   color: #fff;
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   font-weight: 800;
-  line-height: 1.2;
+  line-height: 1.35;
   white-space: normal;
-  backdrop-filter: blur(8px);
-}
-.header-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 12px;
-}
-.header-pills span {
-  padding: 5px 8px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.84);
-  color: var(--pink-dark);
-  font-size: 0.7rem;
-  font-weight: 800;
-  box-shadow: 0 4px 10px rgba(126,70,104,0.12);
+  text-shadow: 0 2px 8px rgba(122,54,83,0.22);
 }
 
 .header-illustration {
   position: relative;
   z-index: 1;
-  width: 156px;
-  height: 126px;
+  width: 126px;
+  height: 104px;
   align-self: end;
   transform: rotate(2deg);
 }
@@ -234,8 +222,8 @@ select:focus-visible {
 /* ─── Tab contents ─── */
 .tab-content {
   display: none;
-  flex: 1;
-  overflow-y: auto;
+  flex: none;
+  overflow-y: visible;
   -webkit-overflow-scrolling: touch;
   padding: 14px 12px 88px;
 }
@@ -523,9 +511,19 @@ select:focus-visible {
 .qty-value {
   font-size: 1rem;
   font-weight: 700;
-  min-width: 36px;
+  min-width: 42px;
   text-align: center;
   color: var(--ink);
+}
+.qty-value.amount-mode {
+  min-width: 62px;
+  font-size: 0.82rem;
+  line-height: 1.15;
+}
+.amount-left,
+.amount-plus {
+  display: inline-block;
+  margin-right: 3px;
 }
 
 .qty-unit {
@@ -783,6 +781,12 @@ select:focus-visible {
 /* ─── Bottom nav ─── */
 .bottom-nav {
   display: flex;
+  position: fixed;
+  left: 50%;
+  right: auto;
+  bottom: 0;
+  width: min(540px, 100vw);
+  transform: translateX(-50%);
   background: rgba(255,255,255,0.92);
   border-top: 1px solid rgba(243,216,229,0.9);
   padding-bottom: env(safe-area-inset-bottom);
@@ -1090,10 +1094,10 @@ select:focus-visible {
 @media (max-width: 540px) {
   .app-header {
     grid-template-columns: minmax(0, 1fr) 34px;
-    min-height: 236px;
+    min-height: 154px;
     align-items: start;
     gap: 10px;
-    padding: calc(20px + env(safe-area-inset-top)) 16px 22px;
+    padding: calc(16px + env(safe-area-inset-top)) 16px 16px;
     background:
       radial-gradient(circle at 22% 20%, rgba(255,255,255,0.38) 0 24px, transparent 25px),
       radial-gradient(circle at 86% 24%, rgba(255,255,255,0.28) 0 46px, transparent 47px),
@@ -1101,41 +1105,36 @@ select:focus-visible {
       linear-gradient(135deg, #ff7aa8 0%, #ffc467 46%, #65b9ff 100%);
   }
   .app-header::before {
-    height: 126px;
-    bottom: -70px;
+    height: 88px;
+    bottom: -54px;
     opacity: 0.9;
   }
   .app-header::after {
-    width: 230px;
-    height: 230px;
+    width: 184px;
+    height: 184px;
     right: -68px;
     top: 10px;
     background: rgba(255,255,255,0.14);
   }
   .header-copy {
     z-index: 3;
-    width: min(68%, 250px);
-    padding-top: 8px;
+    width: min(64%, 230px);
+    padding-top: 4px;
   }
   .app-header h1 {
-    font-size: clamp(1.75rem, 8vw, 2.25rem);
+    font-size: clamp(1.85rem, 8.5vw, 2.35rem);
     max-width: 6.4em;
   }
   .header-kicker {
     font-size: 0.74rem;
-    box-shadow: 0 5px 14px rgba(122,54,83,0.12);
-  }
-  .header-pills {
-    max-width: 190px;
-    gap: 7px;
   }
   .header-illustration {
     position: absolute;
     z-index: 2;
     right: 10px;
-    bottom: 16px;
-    width: 196px;
-    height: 164px;
+    bottom: 8px;
+    width: 156px;
+    height: 132px;
     transform: rotate(3deg);
   }
   .header-illustration::before {
@@ -1179,19 +1178,16 @@ select:focus-visible {
 
 @media (max-width: 360px) {
   .app-header {
-    min-height: 226px;
+    min-height: 148px;
     padding-inline: 14px;
   }
   .header-copy {
-    width: 64%;
-  }
-  .header-pills span {
-    padding-inline: 7px;
+    width: 62%;
   }
   .header-illustration {
-    right: -8px;
-    width: 182px;
-    height: 154px;
+    right: -2px;
+    width: 146px;
+    height: 124px;
   }
   .floating-leaf {
     right: 14px;

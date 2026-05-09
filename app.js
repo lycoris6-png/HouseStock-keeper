@@ -375,6 +375,13 @@ function normalizeItem(item) {
   if (item.category === 'daily' && item.subcategory === 'other') item.subcategory = 'bath';
   if (!item.dateType) item.dateType = 'expiry';
   if (item.dateType !== 'start') item.dateType = 'expiry';
+  if (!item.stockMode) item.stockMode = 'count';
+  if (item.stockMode !== 'amount') item.stockMode = 'count';
+  if (item.stockMode === 'amount') {
+    item.amountPercent = Number.isFinite(Number(item.amountPercent))
+      ? Math.min(100, Math.max(0, Number(item.amountPercent)))
+      : 100;
+  }
   return item;
 }
 
@@ -398,6 +405,20 @@ function itemDateLabel(item) {
     return `使用開始予定: あと${d}日`;
   }
   return expiryLabel(date);
+}
+
+function itemStockLabel(item) {
+  if (item.stockMode === 'amount') {
+    const amount = Number.isFinite(Number(item.amountPercent)) ? Math.round(Number(item.amountPercent)) : 0;
+    return `<span class="amount-left">残${amount}%</span><span class="amount-plus">+</span>${esc(item.quantity)}<span class="qty-unit">${esc(item.unit)}</span>`;
+  }
+  return `${esc(item.quantity)}<span class="qty-unit">${esc(item.unit)}</span>`;
+}
+
+function isItemLow(item) {
+  const countLow = item.minQuantity > 0 && item.quantity <= item.minQuantity;
+  const amountLow = item.stockMode === 'amount' && Number(item.amountPercent ?? 100) <= 20;
+  return countLow || amountLow;
 }
 
 function $(id)  { return document.getElementById(id); }
@@ -445,7 +466,7 @@ function characterLine(speaker, text, icon, tone = '') {
 function renderCharacterTip() {
   const el = $('characterTip');
   if (!el) return;
-  const lowCount = state.items.filter(i => i.minQuantity > 0 && i.quantity <= i.minQuantity).length;
+  const lowCount = state.items.filter(isItemLow).length;
   const expiryCount = state.items.filter(i => {
     const d = daysUntil(i.expiryDate);
     return d !== null && d <= 3;
@@ -468,7 +489,7 @@ function updateSyncIcon(status) {
 //  在庫不足 → 買い物リスト自動追加
 // ─────────────────────────────────────────────
 function syncAutoShoppingItems() {
-  const lowItems = state.items.filter(i => i.minQuantity > 0 && i.quantity <= i.minQuantity);
+  const lowItems = state.items.filter(isItemLow);
   for (const item of lowItems) {
     const already = state.shoppingList.find(s => s.itemId === item.id && !s.checked);
     if (!already) {
@@ -495,12 +516,16 @@ function renderAll() {
 }
 
 function compareItems(a, b) {
-  const lowA = a.minQuantity > 0 && a.quantity <= a.minQuantity ? 0 : 1;
-  const lowB = b.minQuantity > 0 && b.quantity <= b.minQuantity ? 0 : 1;
+  const lowA = isItemLow(a) ? 0 : 1;
+  const lowB = isItemLow(b) ? 0 : 1;
   const dateA = daysUntil(a.dateType === 'start' ? null : itemDate(a)) ?? 9999;
   const dateB = daysUntil(b.dateType === 'start' ? null : itemDate(b)) ?? 9999;
   if (currentSort === 'name') return a.name.localeCompare(b.name, 'ja');
-  if (currentSort === 'quantity') return (a.quantity - b.quantity) || a.name.localeCompare(b.name, 'ja');
+  if (currentSort === 'quantity') {
+    const amountA = a.stockMode === 'amount' ? Number(a.amountPercent ?? 100) : 100;
+    const amountB = b.stockMode === 'amount' ? Number(b.amountPercent ?? 100) : 100;
+    return (amountA - amountB) || (a.quantity - b.quantity) || a.name.localeCompare(b.name, 'ja');
+  }
   if (currentSort === 'category') {
     return catInfo(a.category).label.localeCompare(catInfo(b.category).label, 'ja')
       || subcatInfo(a.category, a.subcategory).label.localeCompare(subcatInfo(b.category, b.subcategory).label, 'ja')
@@ -563,7 +588,7 @@ function renderStock() {
     const subcat = subcatInfo(item.category, item.subcategory);
     const expCl = itemDateClass(item);
     const expLb = itemDateLabel(item);
-    const isLow = item.minQuantity > 0 && item.quantity <= item.minQuantity;
+    const isLow = isItemLow(item);
     const alertIcon = expCl === 'expired' || expCl === 'expiring-soon'
       ? pick([CHAR.risolWarn, CHAR.risolComplain, CHAR.arteCheck])
       : isLow ? pick([CHAR.risolThink, CHAR.risolAnnoyed, CHAR.arteBasket]) : '';
@@ -580,7 +605,7 @@ function renderStock() {
         ${alertIcon ? `<img class="item-alert-character" src="${alertIcon}" alt="">` : ''}
         <div class="item-qty-ctrl">
           <button class="qty-btn" onclick="changeQty('${item.id}',-1)">−</button>
-          <span class="qty-value">${item.quantity}<span class="qty-unit">${esc(item.unit)}</span></span>
+          <span class="qty-value ${item.stockMode === 'amount' ? 'amount-mode' : ''}">${itemStockLabel(item)}</span>
           <button class="qty-btn" onclick="changeQty('${item.id}',1)">＋</button>
         </div>
         <button class="item-edit-btn" onclick="openEditItem('${item.id}')" aria-label="編集">✏️</button>
@@ -691,6 +716,11 @@ function updateDateTypeLabel() {
   if (input) input.type = isStart ? 'datetime-local' : 'date';
 }
 
+function updateStockModeFields() {
+  const mode = $('itemStockMode')?.value || 'count';
+  $('itemAmountRow')?.classList.toggle('hidden', mode !== 'amount');
+}
+
 // ─────────────────────────────────────────────
 //  品目 CRUD
 // ─────────────────────────────────────────────
@@ -712,6 +742,9 @@ function openAddItem() {
   $('itemCategory').value = currentCategory !== 'all' ? currentCategory : 'refrigerator';
   updateSubcategorySelect($('itemCategory').value);
   $('itemSubcategory').value = currentSubcategory !== 'all' ? currentSubcategory : defaultSubcategory($('itemCategory').value);
+  $('itemStockMode').value = 'count';
+  $('itemAmountPercent').value = '100';
+  updateStockModeFields();
   $('itemQty').value      = '1';
   $('itemUnit').value     = '個';
   $('itemMinQty').value   = '1';
@@ -733,6 +766,9 @@ function openEditItem(itemId) {
   $('itemCategory').value = item.category;
   updateSubcategorySelect(item.category);
   $('itemSubcategory').value = item.subcategory || defaultSubcategory(item.category);
+  $('itemStockMode').value = item.stockMode || 'count';
+  $('itemAmountPercent').value = Number.isFinite(Number(item.amountPercent)) ? item.amountPercent : 100;
+  updateStockModeFields();
   $('itemQty').value      = item.quantity;
   $('itemUnit').value     = item.unit;
   $('itemMinQty').value   = item.minQuantity;
@@ -759,6 +795,8 @@ function saveItem() {
       item.name        = name;
       item.category    = $('itemCategory').value;
       item.subcategory = $('itemSubcategory').value || defaultSubcategory(item.category);
+      item.stockMode   = $('itemStockMode').value;
+      item.amountPercent = item.stockMode === 'amount' ? Math.min(100, Math.max(0, parseFloat($('itemAmountPercent').value) || 0)) : null;
       item.quantity    = qty;
       item.unit        = $('itemUnit').value;
       item.minQuantity = minQty;
@@ -772,6 +810,8 @@ function saveItem() {
       id: uid(), name,
       category:    $('itemCategory').value,
       subcategory: $('itemSubcategory').value || defaultSubcategory($('itemCategory').value),
+      stockMode:   $('itemStockMode').value,
+      amountPercent: $('itemStockMode').value === 'amount' ? Math.min(100, Math.max(0, parseFloat($('itemAmountPercent').value) || 0)) : null,
       quantity:    qty,
       unit:        $('itemUnit').value,
       minQuantity: minQty,
@@ -1048,6 +1088,7 @@ function init() {
   }
 
   $('itemDateType')?.addEventListener('change', updateDateTypeLabel);
+  $('itemStockMode')?.addEventListener('change', updateStockModeFields);
 
   // ユニット選択肢を生成
   document.querySelectorAll('.unit-select').forEach(sel => {
