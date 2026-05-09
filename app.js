@@ -676,13 +676,11 @@ function renderSettings() {
     btn.style.display    = 'none';
     status.style.display = '';
     status.textContent   = '✅ すでにインストール済みです';
-  } else if (_installPrompt) {
-    btn.style.display    = '';
-    status.style.display = 'none';
   } else {
-    btn.style.display    = 'none';
-    status.style.display = '';
-    status.textContent   = 'iPhoneはSafariの「共有 → ホーム画面に追加」からインストールできます。';
+    // プロンプトの有無に関わらずボタンは常に表示
+    btn.style.display    = '';
+    btn.textContent      = _installPrompt ? '📲 ホーム画面にインストール' : '📲 インストール方法を確認';
+    status.style.display = 'none';
   }
 }
 
@@ -1110,21 +1108,25 @@ window.addEventListener('appinstalled', () => {
 });
 
 async function triggerInstall() {
-  if (!_installPrompt) {
-    // すでにインストール済み or iOSなど非対応
-    const status = $('installStatus');
-    if (status) {
-      status.style.display = '';
-      status.textContent = 'iPhoneはSafariの「共有 → ホーム画面に追加」からインストールできます。';
+  if (_installPrompt) {
+    // Chromeがプロンプトを持っている場合はそのまま表示
+    _installPrompt.prompt();
+    const { outcome } = await _installPrompt.userChoice;
+    if (outcome === 'accepted') {
+      _installPrompt = null;
     }
+    renderSettings();
     return;
   }
-  _installPrompt.prompt();
-  const { outcome } = await _installPrompt.userChoice;
-  if (outcome === 'accepted') {
-    _installPrompt = null;
-    const btn = $('installBtn');
-    if (btn) btn.style.display = 'none';
+  // プロンプトがない場合はブラウザ別の手順を案内
+  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
+  const status = $('installStatus');
+  if (!status) return;
+  status.style.display = '';
+  if (isIOS) {
+    status.textContent = 'Safariで開き「共有ボタン（□↑）→ ホーム画面に追加」でインストールできます。';
+  } else {
+    status.textContent = 'Chromeのメニュー（⋮）→「アプリをインストール」または「ホーム画面に追加」をお試しください。';
   }
 }
 
