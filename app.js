@@ -19,6 +19,18 @@ const CATEGORIES = [
 
 const UNITS = ['個', '本', '袋', '缶', '箱', '枚', 'セット', 'パック', 'g', 'kg', 'ml', 'L', '冊', '錠', '包'];
 
+const CHAR = {
+  arteWave: 'assets/chibi_inventory_icons/Arte/Arte_04_waving.png',
+  arteDone: 'assets/chibi_inventory_icons/Arte/Arte_13_clipboard_done.png',
+  arteBasket: 'assets/chibi_inventory_icons/Arte/Arte_09_carrying_basket.png',
+  arteBox: 'assets/chibi_inventory_icons/Arte/Arte_06_carrying_supplies_box.png',
+  risolSmug: 'assets/chibi_inventory_icons/Risol/Risol_02_smug_pose.png',
+  risolWarn: 'assets/chibi_inventory_icons/Risol/Risol_10_stop_warning.png',
+  risolThink: 'assets/chibi_inventory_icons/Risol/Risol_07_thinking.png',
+  risolBox: 'assets/chibi_inventory_icons/Risol/Risol_08_carrying_box.png',
+  coupleCheck: 'assets/chibi_inventory_icons/Couple/Couple_01_clipboard_together.png',
+};
+
 // ─────────────────────────────────────────────
 //  状態
 // ─────────────────────────────────────────────
@@ -234,10 +246,45 @@ function esc(str) {
 
 function showToast(msg, isError = false) {
   const el = $('toast');
-  el.textContent = msg;
-  el.className = 'toast show' + (isError ? ' error' : '');
+  const speaker = isError ? 'risol' : 'arte';
+  const icon = isError ? CHAR.risolWarn : CHAR.arteDone;
+  el.innerHTML = `
+    <img class="toast-avatar" src="${icon}" alt="">
+    <span class="toast-speaker">${speaker === 'risol' ? 'リソル' : 'アーテ'}</span>
+    <span class="toast-message">${esc(msg)}</span>`;
+  el.className = `toast show ${speaker}` + (isError ? ' error' : '');
   clearTimeout(el._t);
   el._t = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+function characterLine(speaker, text, icon, tone = '') {
+  return `
+    <div class="character-tip-inner ${speaker} ${tone}">
+      <img class="character-avatar" src="${icon}" alt="">
+      <div class="speech">
+        <span class="speaker-name">${speaker === 'risol' ? 'リソル' : 'アーテ'}</span>
+        <p>${esc(text)}</p>
+      </div>
+    </div>`;
+}
+
+function renderCharacterTip() {
+  const el = $('characterTip');
+  if (!el) return;
+  const lowCount = state.items.filter(i => i.minQuantity > 0 && i.quantity <= i.minQuantity).length;
+  const expiryCount = state.items.filter(i => {
+    const d = daysUntil(i.expiryDate);
+    return d !== null && d <= 3;
+  }).length;
+  if (!state.items.length) {
+    el.innerHTML = characterLine('arte', 'まずはよく使うものから、ゆっくり登録していきましょうね。', CHAR.arteWave);
+  } else if (expiryCount) {
+    el.innerHTML = characterLine('risol', `期限が近いものが${expiryCount}件あるぞ。べ、別に心配してるわけじゃないからな。`, CHAR.risolWarn, 'warn');
+  } else if (lowCount) {
+    el.innerHTML = characterLine('risol', `在庫少なめが${lowCount}件だ。買い忘れたら困るだろ、早めに見とけよ。`, CHAR.risolThink, 'warn');
+  } else {
+    el.innerHTML = characterLine('arte', 'きれいに整っていますね。この調子で、のんびり続けましょう。', CHAR.arteDone);
+  }
 }
 
 function updateSyncIcon(status) {
@@ -272,6 +319,7 @@ function syncAutoShoppingItems() {
 //  レンダリング
 // ─────────────────────────────────────────────
 function renderAll() {
+  renderCharacterTip();
   if (currentTab === 'stock')    renderStock();
   if (currentTab === 'shopping') renderShopping();
   if (currentTab === 'settings') renderSettings();
@@ -279,6 +327,7 @@ function renderAll() {
 
 /* ── 在庫一覧 ── */
 function renderStock() {
+  renderCharacterTip();
   const list = $('stockList');
   if (!list) return;
 
@@ -295,10 +344,10 @@ function renderStock() {
 
   if (!items.length) {
     list.innerHTML = `
-      <div class="empty-state">
-        <span class="empty-icon">📦</span>
+      <div class="empty-state character-empty">
+        <img class="empty-character" src="${currentCategory === 'all' ? CHAR.arteBox : CHAR.risolBox}" alt="">
         <p>${currentCategory === 'all' ? 'まだ品目がありません' : 'この種類の品目はありません'}</p>
-        <p class="empty-hint">＋ボタンから追加してください</p>
+        <p class="empty-hint">${currentCategory === 'all' ? 'アーテ「ひとつずつ、登録していきましょうね」' : 'リソル「ここは空っぽだな。追加するなら今だぞ」'}</p>
       </div>`;
     return;
   }
@@ -309,7 +358,7 @@ function renderStock() {
     const expLb = expiryLabel(item.expiryDate);
     const isLow = item.minQuantity > 0 && item.quantity <= item.minQuantity;
     return `
-      <div class="item-card cat-${cat.id} ${expCl}" data-id="${item.id}">
+      <div class="item-card cat-${cat.id} ${expCl} ${isLow ? 'low-stock' : ''}" data-id="${item.id}">
         <div class="item-cat-icon">${cat.icon}</div>
         <div class="item-body">
           <div class="item-name">${esc(item.name)}</div>
@@ -317,6 +366,7 @@ function renderStock() {
           ${item.note ? `<div class="item-note">${esc(item.note)}</div>` : ''}
           ${isLow ? `<div class="item-low">⚠️ 在庫少（最小${item.minQuantity}${esc(item.unit)}）</div>` : ''}
         </div>
+        ${(isLow || expCl === 'expired' || expCl === 'expiring-soon') ? `<img class="item-alert-character" src="${CHAR.risolWarn}" alt="">` : ''}
         <div class="item-qty-ctrl">
           <button class="qty-btn" onclick="changeQty('${item.id}',-1)">−</button>
           <span class="qty-value">${item.quantity}<span class="qty-unit">${esc(item.unit)}</span></span>
@@ -335,10 +385,10 @@ function renderShopping() {
 
   if (!state.shoppingList.length) {
     list.innerHTML = `
-      <div class="empty-state">
-        <span class="empty-icon">🛒</span>
+      <div class="empty-state character-empty">
+        <img class="empty-character" src="${CHAR.arteBasket}" alt="">
         <p>買い物リストは空です</p>
-        <p class="empty-hint">在庫が最小数以下になると自動追加されます</p>
+        <p class="empty-hint">アーテ「必要なものが出たら、わたしが一緒に確認しますね」</p>
       </div>`;
     return;
   }
