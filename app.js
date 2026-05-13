@@ -755,12 +755,42 @@ function updateStockModeFields() {
 function changeQty(itemId, delta) {
   const item = state.items.find(i => i.id === itemId);
   if (!item) return;
-  item.quantity = Math.max(0, item.quantity + delta);
+  if (item.stockMode === 'amount') {
+    changeAmountStock(item, delta);
+  } else {
+    item.quantity = Math.max(0, item.quantity + delta);
+  }
   item.updatedAt = new Date().toISOString();
   saveState();
   renderStock();
   // 在庫が最小数以下になったらバッジ更新
   updateShoppingBadge();
+}
+
+function changeAmountStock(item, delta) {
+  const step = delta > 0 ? 10 : -10;
+  let amount = Number.isFinite(Number(item.amountPercent)) ? Number(item.amountPercent) : 0;
+  amount = Math.min(100, Math.max(0, Math.round(amount / 10) * 10));
+  item.quantity = Math.max(0, Number(item.quantity) || 0);
+
+  if (step < 0) {
+    if (amount > 0) {
+      item.amountPercent = Math.max(0, amount + step);
+    } else if (item.quantity > 0) {
+      item.quantity -= 1;
+      item.amountPercent = 90;
+    } else {
+      item.amountPercent = 0;
+    }
+    return;
+  }
+
+  if (amount < 90) {
+    item.amountPercent = amount + step;
+  } else {
+    item.quantity += 1;
+    item.amountPercent = 0;
+  }
 }
 
 function openAddItem() {
