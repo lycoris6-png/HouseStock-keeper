@@ -201,7 +201,17 @@
       </div>
       <div class="form-row">
         <label for="itemNote">メモ</label>
-        <input type="text" id="itemNote" placeholder="例: 開封済み、定期購入など">
+        <input type="text" id="itemNote" placeholder="例: 洗面台の下、開封済みなど">
+      </div>
+      <div class="form-row">
+        <label for="itemPhoto">収納場所の写真</label>
+        <div class="photo-field">
+          <input type="file" id="itemPhoto" accept="image/*">
+          <div id="itemPhotoPreview" class="photo-preview empty">
+            <span>写真なし</span>
+          </div>
+          <button type="button" id="removeItemPhotoBtn" class="btn-soft hidden" onclick="removeItemPhoto()">写真を外す</button>
+        </div>
       </div>
     </div>
     <div class="modal-actions">

@@ -159,6 +159,9 @@ let idleTimer       = null;
 let peekTimer       = null;
 let lastPeekAt      = 0;
 let wasAway         = false;
+let itemPhotoDraft  = null;
+let itemPhotoLoading = false;
+let itemPhotoToken  = 0;
 
 // ─────────────────────────────────────────────
 //  状態の永続化
@@ -382,6 +385,7 @@ function normalizeItem(item) {
       ? Math.min(100, Math.max(0, Number(item.amountPercent)))
       : 100;
   }
+  if (!item.locationPhoto) item.locationPhoto = null;
   return item;
 }
 
@@ -604,6 +608,7 @@ function renderStock() {
           <div class="item-subcat">${subcat.icon} ${esc(subcat.label)}</div>
           ${expLb ? `<div class="item-expiry ${expCl}">${expLb}</div>` : ''}
           ${item.note ? `<div class="item-note">${esc(item.note)}</div>` : ''}
+          ${item.locationPhoto ? `<img class="item-location-photo" src="${item.locationPhoto}" alt="収納場所の写真">` : ''}
           ${isLow ? `<div class="item-low">⚠️ 在庫少（最小${item.minQuantity}${esc(item.unit)}）</div>` : ''}
         </div>
         ${alertIcon ? `<img class="item-alert-character" src="${alertIcon}" alt="">` : ''}
@@ -749,6 +754,89 @@ function updateStockModeFields() {
   }
 }
 
+function renderItemPhotoPreview() {
+  const preview = $('itemPhotoPreview');
+  const removeBtn = $('removeItemPhotoBtn');
+  if (!preview) return;
+  if (itemPhotoDraft) {
+    preview.classList.remove('empty');
+    preview.innerHTML = `<img src="${itemPhotoDraft}" alt="収納場所の写真プレビュー">`;
+    removeBtn?.classList.remove('hidden');
+  } else {
+    preview.classList.add('empty');
+    preview.innerHTML = '<span>写真なし</span>';
+    removeBtn?.classList.add('hidden');
+  }
+}
+
+function removeItemPhoto() {
+  itemPhotoToken += 1;
+  itemPhotoLoading = false;
+  itemPhotoDraft = null;
+  const input = $('itemPhoto');
+  if (input) input.value = '';
+  renderItemPhotoPreview();
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+async function resizePhoto(file) {
+  const src = await readFileAsDataUrl(file);
+  const img = await loadImage(src);
+  const maxSize = 960;
+  const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+  const width = Math.max(1, Math.round(img.width * scale));
+  const height = Math.max(1, Math.round(img.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+  return canvas.toDataURL('image/jpeg', 0.78);
+}
+
+async function handleItemPhotoChange(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) {
+    showToast('画像ファイルを選んでください', true);
+    event.target.value = '';
+    return;
+  }
+  itemPhotoLoading = true;
+  const token = itemPhotoToken + 1;
+  itemPhotoToken = token;
+  try {
+    const resized = await resizePhoto(file);
+    if (token !== itemPhotoToken) return;
+    itemPhotoDraft = resized;
+    renderItemPhotoPreview();
+    showToast('写真を添付しました 📷');
+  } catch (err) {
+    if (token !== itemPhotoToken) return;
+    console.warn(err);
+    showToast('写真の読み込みに失敗しました', true);
+    event.target.value = '';
+  } finally {
+    if (token === itemPhotoToken) itemPhotoLoading = false;
+  }
+}
+
 // ─────────────────────────────────────────────
 //  品目 CRUD
 // ─────────────────────────────────────────────
@@ -811,6 +899,11 @@ function openAddItem() {
   updateDateTypeLabel();
   $('itemExpiry').value   = '';
   $('itemNote').value     = '';
+  itemPhotoToken += 1;
+  itemPhotoDraft = null;
+  itemPhotoLoading = false;
+  if ($('itemPhoto')) $('itemPhoto').value = '';
+  renderItemPhotoPreview();
   $('deleteItemBtn').classList.add('hidden');
   openModal('itemModal');
   setTimeout(() => $('itemName').focus(), 80);
@@ -837,6 +930,11 @@ function openEditItem(itemId) {
   const dateValue = itemDate(item) || '';
   $('itemExpiry').value   = item.dateType === 'start' && dateValue.length === 10 ? `${dateValue}T00:00` : dateValue;
   $('itemNote').value     = item.note || '';
+  itemPhotoToken += 1;
+  itemPhotoDraft          = item.locationPhoto || null;
+  itemPhotoLoading        = false;
+  if ($('itemPhoto')) $('itemPhoto').value = '';
+  renderItemPhotoPreview();
   $('deleteItemBtn').classList.remove('hidden');
   openModal('itemModal');
 }
@@ -844,6 +942,7 @@ function openEditItem(itemId) {
 function saveItem() {
   const name = $('itemName').value.trim();
   if (!name) { showToast('品名を入力してください', true); return; }
+  if (itemPhotoLoading) { showToast('写真を読み込み中です。少し待ってください', true); return; }
 
   const qty    = parseFloat($('itemQty').value)    || 0;
   const minQty = parseFloat($('itemMinQty').value) || 0;
@@ -864,6 +963,7 @@ function saveItem() {
       item.dateType    = $('itemDateType').value;
       item.expiryDate  = $('itemExpiry').value || null;
       item.note        = $('itemNote').value.trim();
+      item.locationPhoto = itemPhotoDraft;
       item.updatedAt   = now;
     }
   } else {
@@ -880,6 +980,7 @@ function saveItem() {
       dateType:    $('itemDateType').value,
       expiryDate:  $('itemExpiry').value || null,
       note:        $('itemNote').value.trim(),
+      locationPhoto: itemPhotoDraft,
       createdAt:   now,
       updatedAt:   now,
     });
@@ -1195,6 +1296,7 @@ function init() {
 
   $('itemDateType')?.addEventListener('change', updateDateTypeLabel);
   $('itemStockMode')?.addEventListener('change', updateStockModeFields);
+  $('itemPhoto')?.addEventListener('change', handleItemPhotoChange);
 
   // ユニット選択肢を生成
   document.querySelectorAll('.unit-select').forEach(sel => {

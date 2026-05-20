@@ -466,6 +466,17 @@ select:focus-visible {
   text-overflow: ellipsis;
 }
 
+.item-location-photo {
+  display: block;
+  width: min(132px, 100%);
+  aspect-ratio: 4 / 3;
+  margin-top: 7px;
+  border: 2px solid #fff;
+  border-radius: 10px;
+  object-fit: cover;
+  box-shadow: 0 6px 14px rgba(64,42,58,0.12);
+}
+
 .item-low {
   font-size: 0.7rem;
   color: #d97706;
@@ -742,6 +753,20 @@ select:focus-visible {
 }
 .btn-secondary:active { background: var(--pink-light); }
 
+.btn-soft {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #fff9fc;
+  color: var(--muted);
+  font-weight: 800;
+  font-size: 0.86rem;
+  text-align: center;
+}
+.btn-soft:active { background: var(--pink-light); }
+
 .btn-danger {
   display: block;
   width: 100%;
@@ -934,6 +959,41 @@ select:focus-visible {
 .form-row input:focus,
 .form-row select:focus,
 .form-row textarea:focus { border-color: var(--pink); }
+
+.photo-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.photo-field input[type="file"] {
+  padding: 9px;
+}
+
+.photo-preview {
+  display: grid;
+  place-items: center;
+  min-height: 128px;
+  border: 2px dashed var(--border-mid);
+  border-radius: var(--radius-sm);
+  background:
+    linear-gradient(135deg, rgba(255,226,237,0.72), rgba(233,255,246,0.72)),
+    #fff;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.photo-preview img {
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+}
+
+.photo-preview.empty {
+  min-height: 92px;
+}
 
 .form-row-2 {
   display: grid;
