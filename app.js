@@ -138,6 +138,10 @@ const CHARACTER_LINES = {
     { speaker: 'arte', text: '買い物リスト、一緒に確認するね。', icon: CHAR.arteBasket },
     { speaker: 'risol', text: '買い忘れ、あとで言い訳しないでよ？', icon: CHAR.risolSupplies },
   ],
+  menusTab: [
+    { speaker: 'arte', text: '今日のごはん、あるもので作れるか見てみよ。', icon: CHAR.arteBasket },
+    { speaker: 'risol', text: '作るって決めたなら、足りないもの確認しときなよ。', icon: CHAR.risolCheck },
+  ],
   settingsTab: [
     { speaker: 'arte', text: '設定は焦らずで大丈夫だよ。', icon: CHAR.arteCheck },
     { speaker: 'risol', text: '同期まわり、ちゃんと見といたほうがいいよ。', icon: CHAR.risolThink },
@@ -164,6 +168,8 @@ let wasAway         = false;
 let itemPhotoDraft  = null;
 let itemPhotoLoading = false;
 let itemPhotoToken  = 0;
+let editingMenuId   = null;
+let menuIngredientDraft = [];
 
 // ─────────────────────────────────────────────
 //  状態の永続化
@@ -171,6 +177,7 @@ let itemPhotoToken  = 0;
 function createInitialState() {
   return {
     items: [],
+    menus: [],
     shoppingList: [],
     settings: { driveClientId: '', driveFileId: null },
   };
@@ -184,7 +191,9 @@ function loadState() {
     if (!s.settings)      s.settings = { driveClientId: '', driveFileId: null };
     if (!s.shoppingList)  s.shoppingList = [];
     if (!s.items)         s.items = [];
+    if (!s.menus)         s.menus = [];
     s.items.forEach(normalizeItem);
+    s.menus.forEach(normalizeMenu);
     return s;
   } catch {
     return createInitialState();
@@ -267,8 +276,10 @@ async function loadFromDrive() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     state.items        = data.items        || [];
+    state.menus        = data.menus        || [];
     state.shoppingList = data.shoppingList || [];
     state.items.forEach(normalizeItem);
+    state.menus.forEach(normalizeMenu);
     persistLocal();
     renderAll();
     showToast('☁️ Driveから読み込みました');
@@ -282,7 +293,7 @@ async function saveToDrive() {
   if (!state.settings.driveClientId) return;
   try {
     const token = await ensureDriveToken();
-    const payload  = JSON.stringify({ items: state.items, shoppingList: state.shoppingList });
+    const payload  = JSON.stringify({ items: state.items, menus: state.menus, shoppingList: state.shoppingList });
     const metadata = { name: DRIVE_FILE_NAME, mimeType: 'application/json' };
 
     const form = new FormData();
@@ -389,6 +400,19 @@ function normalizeItem(item) {
   }
   if (!item.locationPhoto) item.locationPhoto = null;
   return item;
+}
+
+function normalizeMenu(menu) {
+  if (!menu) return menu;
+  if (!Array.isArray(menu.ingredients)) menu.ingredients = [];
+  menu.ingredients = menu.ingredients.map(ingredient => ({
+    itemId: ingredient.itemId || '',
+    name: ingredient.name || '',
+    unit: ingredient.unit || '個',
+    quantity: Math.max(0.5, Number(ingredient.quantity) || 1),
+  }));
+  if (!menu.note) menu.note = '';
+  return menu;
 }
 
 function itemDate(item) {
@@ -521,6 +545,7 @@ function syncAutoShoppingItems() {
 // ─────────────────────────────────────────────
 function renderAll() {
   if (currentTab === 'stock')    renderStock();
+  if (currentTab === 'menus')    renderMenus();
   if (currentTab === 'shopping') renderShopping();
   if (currentTab === 'settings') renderSettings();
 }
@@ -624,6 +649,75 @@ function renderStock() {
   }).join('');
 }
 
+/* ── 料理メニュー ── */
+function menuIngredientStatus(ingredient) {
+  const item = state.items.find(i => i.id === ingredient.itemId);
+  const needed = Math.max(0.5, Number(ingredient.quantity) || 1);
+  if (!item) {
+    return {
+      item: null,
+      name: ingredient.name || '未設定の食材',
+      unit: ingredient.unit || '個',
+      needed,
+      missing: needed,
+      availableText: '在庫との紐付けなし',
+    };
+  }
+  const unit = item.unit || ingredient.unit || '個';
+  if (item.stockMode === 'amount') {
+    const amount = Number(item.amountPercent) || 0;
+    const available = Number(item.quantity || 0) + (amount > 0 ? 1 : 0);
+    return {
+      item, name: item.name, unit, needed,
+      missing: Math.max(0, needed - available),
+      availableText: `残${Math.round(amount)}% + ${item.quantity}${unit}`,
+    };
+  }
+  return {
+    item, name: item.name, unit, needed,
+    missing: Math.max(0, needed - item.quantity),
+    availableText: `${item.quantity}${unit}`,
+  };
+}
+
+function renderMenus() {
+  const list = $('menuList');
+  if (!list) return;
+  if (!state.menus.length) {
+    list.innerHTML = `
+      <div class="empty-state character-empty">
+        <img class="empty-character" src="${CHAR.coupleBasket}" alt="">
+        <p>まだメニューがありません</p>
+        <p class="empty-hint">作りたい料理を登録して、食材を確認しようね。</p>
+      </div>`;
+    return;
+  }
+  list.innerHTML = state.menus.map(menu => {
+    const statuses = menu.ingredients.map(menuIngredientStatus);
+    const missing = statuses.filter(status => status.missing > 0);
+    const statusClass = missing.length ? 'shortage' : 'ready';
+    const statusLabel = missing.length ? `不足 ${missing.length}品` : '作れる';
+    const ingredients = statuses.map(status => `
+      <div class="menu-stock-row ${status.missing > 0 ? 'missing' : 'available'}">
+        <span class="menu-stock-mark">${status.missing > 0 ? '！' : '✓'}</span>
+        <span class="menu-stock-name">${esc(status.name)}</span>
+        <span class="menu-stock-needed">必要${status.needed}${esc(status.unit)}</span>
+        <span class="menu-stock-current">${esc(status.availableText)}</span>
+      </div>`).join('');
+    return `
+      <article class="menu-card ${statusClass}" data-id="${menu.id}">
+        <div class="menu-card-head">
+          <h3>${esc(menu.name)}</h3>
+          <span class="menu-status ${statusClass}">${statusLabel}</span>
+          <button class="menu-edit-btn" onclick="openEditMenu('${menu.id}')" aria-label="編集">✏️</button>
+        </div>
+        ${menu.note ? `<p class="menu-note">${esc(menu.note)}</p>` : ''}
+        <div class="menu-stock-list">${ingredients}</div>
+        ${missing.length ? `<button class="menu-shop-btn" onclick="addMissingMenuItemsToShopping('${menu.id}')">🛒 不足分を買い物リストへ</button>` : ''}
+      </article>`;
+  }).join('');
+}
+
 /* ── 買い物リスト ── */
 function renderShopping() {
   syncAutoShoppingItems();
@@ -651,6 +745,7 @@ function renderShopping() {
         <span class="shop-name">${esc(s.name)}</span>
         <span class="shop-qty">${s.quantity}${esc(s.unit)}</span>
         ${s.auto ? '<span class="shop-auto">自動</span>' : ''}
+        ${s.fromMenu ? '<span class="shop-menu">メニュー</span>' : ''}
       </div>
       <button class="shop-del" onclick="deleteShopItem('${s.id}')" aria-label="削除">🗑️</button>
     </div>`;
@@ -701,12 +796,14 @@ function switchTab(tab) {
 
   // FAB 表示制御
   const stockFab   = $('stockFab');
+  const menuFab = $('menuFab');
   const shoppingFab = $('shoppingFab');
   if (stockFab)    stockFab.classList.toggle('hidden', tab !== 'stock');
+  if (menuFab)     menuFab.classList.toggle('hidden', tab !== 'menus');
   if (shoppingFab) shoppingFab.classList.toggle('hidden', tab !== 'shopping');
 
   renderAll();
-  const lineKey = { stock: 'stockTab', shopping: 'shoppingTab', settings: 'settingsTab' }[tab];
+  const lineKey = { stock: 'stockTab', menus: 'menusTab', shopping: 'shoppingTab', settings: 'settingsTab' }[tab];
   if (lineKey) showCharacterPeek(lineFor(lineKey));
 }
 
@@ -1004,6 +1101,190 @@ function deleteItem() {
   saveState();
   renderAll();
   showToast('削除しました');
+}
+
+// ─────────────────────────────────────────────
+//  料理メニュー
+// ─────────────────────────────────────────────
+function menuItemOptions(selectedId) {
+  const exists = state.items.some(item => item.id === selectedId);
+  let options = '<option value="">食材を選択</option>';
+  if (selectedId && !exists) {
+    options += `<option value="${esc(selectedId)}" selected>登録削除済みの食材</option>`;
+  }
+  options += state.items.map(item => {
+    const selected = item.id === selectedId ? ' selected' : '';
+    return `<option value="${item.id}"${selected}>${esc(item.name)}（${esc(catInfo(item.category).label)}）</option>`;
+  }).join('');
+  return options;
+}
+
+function renderMenuIngredientRows() {
+  const rows = $('menuIngredientRows');
+  if (!rows) return;
+  if (!menuIngredientDraft.length) {
+    rows.innerHTML = '<p class="ingredient-empty">食材を追加してください</p>';
+    return;
+  }
+  rows.innerHTML = menuIngredientDraft.map(row => {
+    const item = state.items.find(i => i.id === row.itemId);
+    const unit = item?.unit || row.unit || '個';
+    return `
+      <div class="menu-ingredient-row">
+        <select aria-label="食材" onchange="updateMenuIngredient('${row.id}','itemId',this.value)">
+          ${menuItemOptions(row.itemId)}
+        </select>
+        <div class="ingredient-quantity">
+          <input type="number" min="0.5" step="0.5" value="${row.quantity}"
+            aria-label="必要数" onchange="updateMenuIngredient('${row.id}','quantity',this.value)">
+          <span>${esc(unit)}</span>
+        </div>
+        <button type="button" class="ingredient-remove" onclick="removeMenuIngredientRow('${row.id}')" aria-label="食材を外す">✕</button>
+      </div>`;
+  }).join('');
+}
+
+function addMenuIngredientRow(ingredient = null) {
+  menuIngredientDraft.push({
+    id: uid(),
+    itemId: ingredient?.itemId || '',
+    name: ingredient?.name || '',
+    unit: ingredient?.unit || '個',
+    quantity: Math.max(0.5, Number(ingredient?.quantity) || 1),
+  });
+  renderMenuIngredientRows();
+}
+
+function updateMenuIngredient(rowId, field, value) {
+  const row = menuIngredientDraft.find(ingredient => ingredient.id === rowId);
+  if (!row) return;
+  if (field === 'quantity') {
+    row.quantity = Math.max(0.5, Number(value) || 1);
+    return;
+  }
+  row.itemId = value;
+  const item = state.items.find(i => i.id === value);
+  if (item) {
+    row.name = item.name;
+    row.unit = item.unit;
+  }
+  renderMenuIngredientRows();
+}
+
+function removeMenuIngredientRow(rowId) {
+  menuIngredientDraft = menuIngredientDraft.filter(ingredient => ingredient.id !== rowId);
+  renderMenuIngredientRows();
+}
+
+function openAddMenu() {
+  editingMenuId = null;
+  $('menuModalTitle').textContent = 'メニューを追加';
+  $('menuName').value = '';
+  $('menuNote').value = '';
+  menuIngredientDraft = [];
+  addMenuIngredientRow();
+  $('deleteMenuBtn').classList.add('hidden');
+  openModal('menuModal');
+  setTimeout(() => $('menuName').focus(), 80);
+}
+
+function openEditMenu(menuId) {
+  const menu = state.menus.find(entry => entry.id === menuId);
+  if (!menu) return;
+  editingMenuId = menuId;
+  $('menuModalTitle').textContent = 'メニューを編集';
+  $('menuName').value = menu.name;
+  $('menuNote').value = menu.note || '';
+  menuIngredientDraft = [];
+  menu.ingredients.forEach(ingredient => addMenuIngredientRow(ingredient));
+  if (!menuIngredientDraft.length) addMenuIngredientRow();
+  $('deleteMenuBtn').classList.remove('hidden');
+  openModal('menuModal');
+}
+
+function saveMenu() {
+  const name = $('menuName').value.trim();
+  if (!name) { showToast('料理名を入力してください', true); return; }
+  const ingredients = menuIngredientDraft.filter(ingredient => ingredient.itemId).map(ingredient => {
+    const item = state.items.find(i => i.id === ingredient.itemId);
+    return {
+      itemId: ingredient.itemId,
+      name: item?.name || ingredient.name,
+      unit: item?.unit || ingredient.unit,
+      quantity: Math.max(0.5, Number(ingredient.quantity) || 1),
+    };
+  });
+  if (!ingredients.length) { showToast('必要な食材を選んでください', true); return; }
+  const uniqueIds = new Set(ingredients.map(ingredient => ingredient.itemId));
+  if (uniqueIds.size !== ingredients.length) { showToast('同じ食材が重複しています', true); return; }
+  const now = new Date().toISOString();
+  if (editingMenuId) {
+    const menu = state.menus.find(entry => entry.id === editingMenuId);
+    if (!menu) return;
+    menu.name = name;
+    menu.note = $('menuNote').value.trim();
+    menu.ingredients = ingredients;
+    menu.updatedAt = now;
+  } else {
+    state.menus.push({
+      id: uid(),
+      name,
+      note: $('menuNote').value.trim(),
+      ingredients,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  closeModal('menuModal');
+  saveState();
+  renderMenus();
+  showToast(editingMenuId ? 'メニューを更新しました ✅' : 'メニューを追加しました ✅');
+}
+
+function deleteMenu() {
+  if (!editingMenuId) return;
+  if (!confirm('このメニューを削除しますか？')) return;
+  state.menus = state.menus.filter(menu => menu.id !== editingMenuId);
+  closeModal('menuModal');
+  saveState();
+  renderMenus();
+  showToast('メニューを削除しました');
+}
+
+function addMissingMenuItemsToShopping(menuId) {
+  const menu = state.menus.find(entry => entry.id === menuId);
+  if (!menu) return;
+  let added = 0;
+  let unresolved = 0;
+  menu.ingredients.map(menuIngredientStatus).forEach(status => {
+    if (status.missing <= 0) return;
+    if (!status.item) {
+      unresolved += 1;
+      return;
+    }
+    const pending = state.shoppingList
+      .filter(shop => shop.itemId === status.item.id && !shop.checked)
+      .reduce((total, shop) => total + Number(shop.quantity || 0), 0);
+    const quantity = Math.max(0, status.missing - pending);
+    if (quantity <= 0) return;
+    state.shoppingList.push({
+      id: uid(),
+      itemId: status.item.id,
+      name: status.item.name,
+      quantity,
+      unit: status.unit,
+      checked: false,
+      addedAt: new Date().toISOString(),
+      auto: false,
+      fromMenu: true,
+    });
+    added += 1;
+  });
+  saveState();
+  updateShoppingBadge();
+  if (added) showToast('不足分を買い物リストに追加しました 🛒');
+  else if (unresolved) showToast('紐付けのない食材を編集してください', true);
+  else showToast('不足分はすでに買い物リストにあります');
 }
 
 // ─────────────────────────────────────────────
