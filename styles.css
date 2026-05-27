@@ -1157,26 +1157,86 @@ select:focus-visible {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 94px 32px;
   gap: 6px;
-  align-items: end;
+  align-items: center;
 }
-.ingredient-picker {
+.ingredient-select {
   display: flex;
-  flex-direction: column;
-  gap: 5px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   min-width: 0;
-}
-.ingredient-picker input,
-.ingredient-picker select {
-  min-width: 0;
-  padding: 9px 8px;
+  padding: 10px 10px;
   border: 2px solid var(--border);
   border-radius: var(--radius-sm);
   background: #fff9fc;
   color: var(--ink);
   font-size: 0.82rem;
+  font-weight: 800;
+  text-align: left;
 }
-.ingredient-picker input {
+.ingredient-select.empty { color: var(--muted); }
+.ingredient-select span {
+  color: var(--pink-dark);
+  flex-shrink: 0;
+}
+.ingredient-picker-panel {
+  padding: 9px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
   background: #fff;
+  box-shadow: 0 8px 18px rgba(114,74,105,0.09);
+}
+.ingredient-picker-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.ingredient-picker-head input {
+  width: 100%;
+  padding: 9px 10px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #fff9fc;
+  color: var(--ink);
+  font-size: 0.85rem;
+}
+.ingredient-picker-head button {
+  border: none;
+  border-radius: 50%;
+  background: var(--pink-light);
+  color: var(--pink-dark);
+  font-weight: 900;
+}
+.ingredient-results {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 210px;
+  overflow-y: auto;
+}
+.ingredient-result {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 9px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: #fff6fb;
+  color: var(--ink);
+  text-align: left;
+}
+.ingredient-result strong { font-size: 0.82rem; }
+.ingredient-result span {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+.ingredient-no-result {
+  padding: 14px 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-align: center;
 }
 .ingredient-quantity {
   display: flex;

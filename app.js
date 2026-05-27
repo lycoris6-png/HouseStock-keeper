@@ -171,6 +171,8 @@ let itemPhotoToken  = 0;
 let editingMenuId   = null;
 let menuIngredientDraft = [];
 let expandedMenuIds = new Set();
+let choosingIngredientRowId = null;
+let ingredientPickerQuery = '';
 
 // ─────────────────────────────────────────────
 //  状態の永続化
@@ -1121,24 +1123,14 @@ function deleteItem() {
 // ─────────────────────────────────────────────
 //  料理メニュー
 // ─────────────────────────────────────────────
-function menuItemOptions(selectedId, query = '') {
-  const exists = state.items.some(item => item.id === selectedId);
-  let options = '<option value="">食材を選択</option>';
-  if (selectedId && !exists) {
-    options += `<option value="${esc(selectedId)}" selected>登録削除済みの食材</option>`;
-  }
+function matchingMenuItems(query = '') {
   const normalizedQuery = query.trim().toLocaleLowerCase('ja');
-  const availableItems = state.items.filter(item => {
-    if (item.id === selectedId || !normalizedQuery) return true;
+  return state.items.filter(item => {
+    if (!normalizedQuery) return true;
     const category = catInfo(item.category).label;
     const subcategory = subcatInfo(item.category, item.subcategory).label;
     return `${item.name} ${category} ${subcategory}`.toLocaleLowerCase('ja').includes(normalizedQuery);
   });
-  options += availableItems.map(item => {
-    const selected = item.id === selectedId ? ' selected' : '';
-    return `<option value="${item.id}"${selected}>${esc(item.name)}（${esc(catInfo(item.category).label)}）</option>`;
-  }).join('');
-  return options;
 }
 
 function renderMenuIngredientRows() {
@@ -1151,17 +1143,12 @@ function renderMenuIngredientRows() {
   rows.innerHTML = menuIngredientDraft.map(row => {
     const item = state.items.find(i => i.id === row.itemId);
     const unit = item?.unit || row.unit || '個';
+    const label = item?.name || row.name || '食材を選択';
+    const emptyClass = item ? '' : ' empty';
     return `
       <div class="menu-ingredient-row">
-        <div class="ingredient-picker">
-          <input type="search" class="ingredient-search" value="${esc(row.query || '')}"
-            placeholder="食材を検索" aria-label="食材を検索"
-            oninput="filterMenuIngredientOptions('${row.id}',this.value)">
-          <select id="menuIngredientSelect-${row.id}" aria-label="食材"
-            onchange="updateMenuIngredient('${row.id}','itemId',this.value)">
-            ${menuItemOptions(row.itemId, row.query)}
-          </select>
-        </div>
+        <button type="button" class="ingredient-select${emptyClass}"
+          onclick="openIngredientPicker('${row.id}')">${esc(label)}<span>⌄</span></button>
         <div class="ingredient-quantity">
           <input type="number" min="0.5" step="0.5" value="${row.quantity}"
             aria-label="必要数" onchange="updateMenuIngredient('${row.id}','quantity',this.value)">
@@ -1170,26 +1157,77 @@ function renderMenuIngredientRows() {
         <button type="button" class="ingredient-remove" onclick="removeMenuIngredientRow('${row.id}')" aria-label="食材を外す">✕</button>
       </div>`;
   }).join('');
+  renderIngredientPicker();
 }
 
 function addMenuIngredientRow(ingredient = null) {
-  menuIngredientDraft.push({
+  const row = {
     id: uid(),
     itemId: ingredient?.itemId || '',
     name: ingredient?.name || '',
     unit: ingredient?.unit || '個',
     quantity: Math.max(0.5, Number(ingredient?.quantity) || 1),
-    query: '',
-  });
+  };
+  menuIngredientDraft.push(row);
+  if (!ingredient) {
+    choosingIngredientRowId = row.id;
+    ingredientPickerQuery = '';
+  }
   renderMenuIngredientRows();
 }
 
-function filterMenuIngredientOptions(rowId, query) {
-  const row = menuIngredientDraft.find(ingredient => ingredient.id === rowId);
-  const select = $(`menuIngredientSelect-${rowId}`);
-  if (!row || !select) return;
-  row.query = query;
-  select.innerHTML = menuItemOptions(row.itemId, query);
+function openIngredientPicker(rowId) {
+  choosingIngredientRowId = choosingIngredientRowId === rowId ? null : rowId;
+  ingredientPickerQuery = '';
+  renderIngredientPicker();
+  if (choosingIngredientRowId) setTimeout(() => $('ingredientPickerSearch')?.focus(), 40);
+}
+
+function ingredientResultsHtml() {
+  const candidates = matchingMenuItems(ingredientPickerQuery);
+  return candidates.length
+    ? candidates.map(item => `
+      <button type="button" class="ingredient-result" onclick="chooseMenuIngredient('${item.id}')">
+        <strong>${esc(item.name)}</strong>
+        <span>${esc(catInfo(item.category).label)} / ${esc(subcatInfo(item.category, item.subcategory).label)}　${itemStockLabel(item)}</span>
+      </button>`).join('')
+    : '<p class="ingredient-no-result">一致する在庫品がありません</p>';
+}
+
+function renderIngredientPicker() {
+  const panel = $('menuIngredientPicker');
+  if (!panel) return;
+  if (!choosingIngredientRowId) {
+    panel.classList.add('hidden');
+    panel.innerHTML = '';
+    return;
+  }
+  panel.classList.remove('hidden');
+  panel.innerHTML = `
+    <div class="ingredient-picker-head">
+      <input id="ingredientPickerSearch" type="search" value="${esc(ingredientPickerQuery)}"
+        placeholder="食材名や分類で検索" aria-label="食材を検索"
+        oninput="filterMenuIngredients(this.value)">
+      <button type="button" onclick="closeIngredientPicker()" aria-label="閉じる">✕</button>
+    </div>
+    <div id="ingredientResults" class="ingredient-results">${ingredientResultsHtml()}</div>`;
+}
+
+function filterMenuIngredients(query) {
+  ingredientPickerQuery = query;
+  const results = $('ingredientResults');
+  if (results) results.innerHTML = ingredientResultsHtml();
+}
+
+function chooseMenuIngredient(itemId) {
+  updateMenuIngredient(choosingIngredientRowId, 'itemId', itemId);
+  closeIngredientPicker();
+}
+
+function closeIngredientPicker() {
+  choosingIngredientRowId = null;
+  ingredientPickerQuery = '';
+  renderIngredientPicker();
 }
 
 function updateMenuIngredient(rowId, field, value) {
@@ -1210,6 +1248,7 @@ function updateMenuIngredient(rowId, field, value) {
 
 function removeMenuIngredientRow(rowId) {
   menuIngredientDraft = menuIngredientDraft.filter(ingredient => ingredient.id !== rowId);
+  if (choosingIngredientRowId === rowId) closeIngredientPicker();
   renderMenuIngredientRows();
 }
 
@@ -1219,6 +1258,7 @@ function openAddMenu() {
   $('menuName').value = '';
   $('menuNote').value = '';
   menuIngredientDraft = [];
+  choosingIngredientRowId = null;
   addMenuIngredientRow();
   $('deleteMenuBtn').classList.add('hidden');
   openModal('menuModal');
@@ -1233,6 +1273,8 @@ function openEditMenu(menuId) {
   $('menuName').value = menu.name;
   $('menuNote').value = menu.note || '';
   menuIngredientDraft = [];
+  choosingIngredientRowId = null;
+  ingredientPickerQuery = '';
   menu.ingredients.forEach(ingredient => addMenuIngredientRow(ingredient));
   if (!menuIngredientDraft.length) addMenuIngredientRow();
   $('deleteMenuBtn').classList.remove('hidden');
