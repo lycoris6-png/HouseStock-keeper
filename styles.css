@@ -678,6 +678,18 @@ select:focus-visible {
   font-size: 0.7rem;
 }
 .menu-stock-row.missing .menu-stock-current { color: #c16200; }
+.menu-register-btn {
+  grid-column: 2 / -1;
+  width: max-content;
+  margin-top: 3px;
+  padding: 5px 10px;
+  border: 2px solid var(--border);
+  border-radius: 999px;
+  background: #fff6fb;
+  color: var(--pink-dark);
+  font-size: 0.68rem;
+  font-weight: 900;
+}
 .menu-shop-btn {
   width: 100%;
   margin-top: 10px;
@@ -1175,6 +1187,10 @@ select:focus-visible {
   text-align: left;
 }
 .ingredient-select.empty { color: var(--muted); }
+.ingredient-select.unregistered {
+  border-color: var(--amber-light);
+  color: #a65700;
+}
 .ingredient-select span {
   color: var(--pink-dark);
   flex-shrink: 0;
@@ -1232,6 +1248,17 @@ select:focus-visible {
   color: var(--muted);
   font-size: 0.68rem;
 }
+.ingredient-new-result {
+  width: 100%;
+  padding: 9px;
+  border: 2px dashed var(--pink);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--pink-dark);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-align: left;
+}
 .ingredient-no-result {
   padding: 14px 8px;
   color: var(--muted);
@@ -1250,6 +1277,15 @@ select:focus-visible {
   min-width: 0;
   padding: 9px 6px;
   text-align: right;
+}
+.ingredient-quantity select {
+  width: 46px;
+  padding: 9px 3px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #fff9fc;
+  color: var(--ink);
+  font-size: 0.72rem;
 }
 .ingredient-remove {
   display: grid;
