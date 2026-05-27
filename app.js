@@ -20,6 +20,7 @@ const SUBCATEGORIES = {
     { id: 'chilled', label: '冷蔵', icon: '🥛' },
     { id: 'frozen',  label: '冷凍', icon: '🧊' },
     { id: 'fresh',   label: '生鮮', icon: '🥬' },
+    { id: 'seasoning', label: '調味料', icon: '🧂' },
     { id: 'drink',   label: '飲み物', icon: '🧃' },
   ],
   pantry: [
@@ -30,6 +31,7 @@ const SUBCATEGORIES = {
   ],
   daily: [
     { id: 'paper',    label: '紙類', icon: '🧻' },
+    { id: 'kitchen',  label: 'キッチン', icon: '🍳' },
     { id: 'cleaning', label: '掃除', icon: '🧽' },
     { id: 'hygiene',  label: '衛生', icon: '🪥' },
     { id: 'bath',     label: 'バス', icon: '🧴' },
