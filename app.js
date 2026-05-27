@@ -170,6 +170,7 @@ let itemPhotoLoading = false;
 let itemPhotoToken  = 0;
 let editingMenuId   = null;
 let menuIngredientDraft = [];
+let expandedMenuIds = new Set();
 
 // ─────────────────────────────────────────────
 //  状態の永続化
@@ -697,6 +698,7 @@ function renderMenus() {
     const missing = statuses.filter(status => status.missing > 0);
     const statusClass = missing.length ? 'shortage' : 'ready';
     const statusLabel = missing.length ? `不足 ${missing.length}品` : '作れる';
+    const expanded = expandedMenuIds.has(menu.id);
     const ingredients = statuses.map(status => `
       <div class="menu-stock-row ${status.missing > 0 ? 'missing' : 'available'}">
         <span class="menu-stock-mark">${status.missing > 0 ? '！' : '✓'}</span>
@@ -710,12 +712,25 @@ function renderMenus() {
           <h3>${esc(menu.name)}</h3>
           <span class="menu-status ${statusClass}">${statusLabel}</span>
           <button class="menu-edit-btn" onclick="openEditMenu('${menu.id}')" aria-label="編集">✏️</button>
+          <button class="menu-toggle-btn" onclick="toggleMenuDetails('${menu.id}')" aria-expanded="${expanded}" aria-label="${expanded ? '詳細を閉じる' : '詳細を開く'}">${expanded ? '⌃' : '⌄'}</button>
         </div>
-        ${menu.note ? `<p class="menu-note">${esc(menu.note)}</p>` : ''}
-        <div class="menu-stock-list">${ingredients}</div>
-        ${missing.length ? `<button class="menu-shop-btn" onclick="addMissingMenuItemsToShopping('${menu.id}')">🛒 不足分を買い物リストへ</button>` : ''}
+        ${expanded ? `
+          <div class="menu-card-details">
+            ${menu.note ? `<p class="menu-note">${esc(menu.note)}</p>` : ''}
+            <div class="menu-stock-list">${ingredients}</div>
+            ${missing.length ? `<button class="menu-shop-btn" onclick="addMissingMenuItemsToShopping('${menu.id}')">🛒 不足分を買い物リストへ</button>` : ''}
+          </div>` : ''}
       </article>`;
   }).join('');
+}
+
+function toggleMenuDetails(menuId) {
+  if (expandedMenuIds.has(menuId)) {
+    expandedMenuIds.delete(menuId);
+  } else {
+    expandedMenuIds.add(menuId);
+  }
+  renderMenus();
 }
 
 /* ── 買い物リスト ── */
@@ -1106,13 +1121,20 @@ function deleteItem() {
 // ─────────────────────────────────────────────
 //  料理メニュー
 // ─────────────────────────────────────────────
-function menuItemOptions(selectedId) {
+function menuItemOptions(selectedId, query = '') {
   const exists = state.items.some(item => item.id === selectedId);
   let options = '<option value="">食材を選択</option>';
   if (selectedId && !exists) {
     options += `<option value="${esc(selectedId)}" selected>登録削除済みの食材</option>`;
   }
-  options += state.items.map(item => {
+  const normalizedQuery = query.trim().toLocaleLowerCase('ja');
+  const availableItems = state.items.filter(item => {
+    if (item.id === selectedId || !normalizedQuery) return true;
+    const category = catInfo(item.category).label;
+    const subcategory = subcatInfo(item.category, item.subcategory).label;
+    return `${item.name} ${category} ${subcategory}`.toLocaleLowerCase('ja').includes(normalizedQuery);
+  });
+  options += availableItems.map(item => {
     const selected = item.id === selectedId ? ' selected' : '';
     return `<option value="${item.id}"${selected}>${esc(item.name)}（${esc(catInfo(item.category).label)}）</option>`;
   }).join('');
@@ -1131,9 +1153,15 @@ function renderMenuIngredientRows() {
     const unit = item?.unit || row.unit || '個';
     return `
       <div class="menu-ingredient-row">
-        <select aria-label="食材" onchange="updateMenuIngredient('${row.id}','itemId',this.value)">
-          ${menuItemOptions(row.itemId)}
-        </select>
+        <div class="ingredient-picker">
+          <input type="search" class="ingredient-search" value="${esc(row.query || '')}"
+            placeholder="食材を検索" aria-label="食材を検索"
+            oninput="filterMenuIngredientOptions('${row.id}',this.value)">
+          <select id="menuIngredientSelect-${row.id}" aria-label="食材"
+            onchange="updateMenuIngredient('${row.id}','itemId',this.value)">
+            ${menuItemOptions(row.itemId, row.query)}
+          </select>
+        </div>
         <div class="ingredient-quantity">
           <input type="number" min="0.5" step="0.5" value="${row.quantity}"
             aria-label="必要数" onchange="updateMenuIngredient('${row.id}','quantity',this.value)">
@@ -1151,8 +1179,17 @@ function addMenuIngredientRow(ingredient = null) {
     name: ingredient?.name || '',
     unit: ingredient?.unit || '個',
     quantity: Math.max(0.5, Number(ingredient?.quantity) || 1),
+    query: '',
   });
   renderMenuIngredientRows();
+}
+
+function filterMenuIngredientOptions(rowId, query) {
+  const row = menuIngredientDraft.find(ingredient => ingredient.id === rowId);
+  const select = $(`menuIngredientSelect-${rowId}`);
+  if (!row || !select) return;
+  row.query = query;
+  select.innerHTML = menuItemOptions(row.itemId, query);
 }
 
 function updateMenuIngredient(rowId, field, value) {
@@ -1218,6 +1255,7 @@ function saveMenu() {
   const uniqueIds = new Set(ingredients.map(ingredient => ingredient.itemId));
   if (uniqueIds.size !== ingredients.length) { showToast('同じ食材が重複しています', true); return; }
   const now = new Date().toISOString();
+  let savedMenuId = editingMenuId;
   if (editingMenuId) {
     const menu = state.menus.find(entry => entry.id === editingMenuId);
     if (!menu) return;
@@ -1226,8 +1264,9 @@ function saveMenu() {
     menu.ingredients = ingredients;
     menu.updatedAt = now;
   } else {
+    savedMenuId = uid();
     state.menus.push({
-      id: uid(),
+      id: savedMenuId,
       name,
       note: $('menuNote').value.trim(),
       ingredients,
@@ -1235,6 +1274,7 @@ function saveMenu() {
       updatedAt: now,
     });
   }
+  expandedMenuIds.add(savedMenuId);
   closeModal('menuModal');
   saveState();
   renderMenus();
@@ -1245,6 +1285,7 @@ function deleteMenu() {
   if (!editingMenuId) return;
   if (!confirm('このメニューを削除しますか？')) return;
   state.menus = state.menus.filter(menu => menu.id !== editingMenuId);
+  expandedMenuIds.delete(editingMenuId);
   closeModal('menuModal');
   saveState();
   renderMenus();
