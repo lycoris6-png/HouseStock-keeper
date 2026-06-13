@@ -303,7 +303,12 @@ select:focus-visible {
   font-size: 0.72rem;
   font-weight: 900;
 }
-.stock-toolbar select {
+.stock-toolbar input[type="search"] {
+  flex: 1;
+  min-width: 0;
+}
+.stock-toolbar select,
+.stock-toolbar input[type="search"] {
   min-width: 138px;
   padding: 7px 10px;
   border: 2px solid rgba(255,255,255,0.9);

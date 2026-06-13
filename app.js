@@ -156,6 +156,7 @@ let currentTab      = 'stock';
 let currentCategory = 'all';
 let currentSubcategory = 'all';
 let currentSort = 'priority';
+let stockSearchQuery = '';
 let driveToken      = null;
 let driveTokenExpiresAt = 0;
 let driveTokenClient = null;
@@ -205,7 +206,12 @@ function loadState() {
 }
 
 function persistLocal() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.warn('persistLocal:', e);
+    showToast('保存に失敗しました。写真を減らすか容量を確認してください', true);
+  }
 }
 
 function saveState() {
@@ -327,6 +333,7 @@ async function saveToDrive() {
   } catch (e) {
     console.warn('Drive save:', e);
     updateSyncIcon('error');
+    throw e;
   }
 }
 
@@ -344,7 +351,10 @@ function uid() {
     : Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-function todayStr() { return new Date().toISOString().slice(0, 10); }
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 function daysUntil(dateStr) {
   if (!dateStr) return null;
@@ -506,6 +516,7 @@ function renderCharacterTip() {
   if (!el) return;
   const lowCount = state.items.filter(isItemLow).length;
   const expiryCount = state.items.filter(i => {
+    if (i.dateType === 'start') return false;
     const d = daysUntil(i.expiryDate);
     return d !== null && d <= 3;
   }).length;
@@ -528,6 +539,7 @@ function updateSyncIcon(status) {
 // ─────────────────────────────────────────────
 function syncAutoShoppingItems() {
   const lowItems = state.items.filter(isItemLow);
+  let changed = false;
   for (const item of lowItems) {
     const already = state.shoppingList.find(s => s.itemId === item.id && !s.checked);
     if (!already) {
@@ -540,8 +552,10 @@ function syncAutoShoppingItems() {
         addedAt: new Date().toISOString(),
         auto: true,
       });
+      changed = true;
     }
   }
+  if (changed) persistLocal();
 }
 
 // ─────────────────────────────────────────────
@@ -608,10 +622,22 @@ function renderStock() {
   if (currentSubcategory !== 'all') {
     items = items.filter(i => i.subcategory === currentSubcategory);
   }
+  const query = stockSearchQuery.trim().toLocaleLowerCase('ja');
+  if (query) {
+    items = items.filter(i => `${i.name} ${i.note || ''}`.toLocaleLowerCase('ja').includes(query));
+  }
 
   items.sort(compareItems);
 
   if (!items.length) {
+    if (query) {
+      list.innerHTML = `
+        <div class="empty-state character-empty">
+          <img class="empty-character" src="${CHAR.risolThink}" alt="">
+          <p>「${esc(stockSearchQuery.trim())}」に一致する品目はありません</p>
+        </div>`;
+      return;
+    }
     const emptyLine = currentCategory === 'all' ? lineFor('emptyAll') : lineFor('emptyCategory');
     list.innerHTML = `
       <div class="empty-state character-empty">
@@ -968,9 +994,27 @@ function changeQty(itemId, delta) {
   }
   item.updatedAt = new Date().toISOString();
   saveState();
-  renderStock();
+  // 並び替えでカードが飛ばないよう、該当カードだけ更新する
+  updateStockCard(item);
+  renderCharacterTip();
   // 在庫が最小数以下になったらバッジ更新
   updateShoppingBadge();
+}
+
+function updateStockCard(item) {
+  const card = document.querySelector(`.item-card[data-id="${item.id}"]`);
+  if (!card) { renderStock(); return; }
+  const qtyEl = card.querySelector('.qty-value');
+  if (qtyEl) qtyEl.innerHTML = itemStockLabel(item);
+  const isLow = isItemLow(item);
+  card.classList.toggle('low-stock', isLow);
+  const lowEl = card.querySelector('.item-low');
+  if (isLow && !lowEl) {
+    card.querySelector('.item-body')?.insertAdjacentHTML('beforeend',
+      `<div class="item-low">⚠️ 在庫少（最小${item.minQuantity}${esc(item.unit)}）</div>`);
+  } else if (!isLow && lowEl) {
+    lowEl.remove();
+  }
 }
 
 function changeAmountStock(item, delta) {
@@ -1635,6 +1679,50 @@ async function syncNow() {
 }
 
 // ─────────────────────────────────────────────
+//  JSON バックアップ
+// ─────────────────────────────────────────────
+function exportData() {
+  const payload = JSON.stringify(
+    { items: state.items, menus: state.menus, shoppingList: state.shoppingList },
+    null, 2
+  );
+  const blob = new Blob([payload], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `household-stock-backup-${todayStr()}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast('バックアップを書き出しました 💾');
+}
+
+function importData(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!Array.isArray(data.items)) throw new Error('バックアップファイルの形式が違います');
+      if (!confirm(`現在のデータをバックアップの内容（品目${data.items.length}件）で置き換えますか？`)) return;
+      state.items        = data.items;
+      state.menus        = Array.isArray(data.menus) ? data.menus : [];
+      state.shoppingList = Array.isArray(data.shoppingList) ? data.shoppingList : [];
+      state.items.forEach(normalizeItem);
+      state.menus.forEach(normalizeMenu);
+      saveState();
+      renderAll();
+      updateShoppingBadge();
+      showToast('バックアップを読み込みました ✅');
+    } catch (e) {
+      showToast('読み込み失敗: ' + e.message, true);
+    }
+  };
+  reader.onerror = () => showToast('ファイルを読み込めませんでした', true);
+  reader.readAsText(file);
+}
+
+// ─────────────────────────────────────────────
 //  Service Worker
 // ─────────────────────────────────────────────
 function registerSW() {
@@ -1700,6 +1788,14 @@ function init() {
       `<button class="cat-chip ${c.id === 'all' ? 'active' : ''}" data-cat="${c.id}"
          onclick="switchCategory('${c.id}')">${c.icon} ${c.label}</button>`
     ).join('');
+  }
+
+  const stockSearch = $('stockSearch');
+  if (stockSearch) {
+    stockSearch.addEventListener('input', () => {
+      stockSearchQuery = stockSearch.value;
+      renderStock();
+    });
   }
 
   const sortSelect = $('sortSelect');

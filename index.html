@@ -42,6 +42,7 @@
     <div id="catChips" class="cat-chips"></div>
     <div id="subcatChips" class="subcat-chips"></div>
     <div class="stock-toolbar">
+      <input type="search" id="stockSearch" placeholder="🔍 品名・メモで検索" aria-label="在庫を検索">
       <label for="sortSelect">並び替え</label>
       <select id="sortSelect"></select>
     </div>
@@ -116,6 +117,13 @@
       </div>
       <div class="settings-row">
         <button class="btn-secondary" onclick="syncNow()">今すぐ Drive に保存</button>
+      </div>
+      <div class="settings-row">
+        <button class="btn-secondary" onclick="exportData()">💾 JSONバックアップを書き出す</button>
+      </div>
+      <div class="settings-row">
+        <button class="btn-secondary" onclick="document.getElementById('importFile').click()">📂 バックアップを読み込む</button>
+        <input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="importData(event)">
       </div>
     </div>
   </div>
