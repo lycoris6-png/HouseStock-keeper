@@ -48,6 +48,9 @@ const SUBCATEGORIES = {
   ],
 };
 
+// お気に入りは通常カテゴリではなく、チップ上だけの絞り込み
+const FAVORITE_FILTER = { id: 'fav', label: 'お気に入り', icon: '⭐' };
+
 const SORT_OPTIONS = [
   { id: 'priority', label: '期限・在庫優先' },
   { id: 'name',     label: '名前順' },
@@ -115,6 +118,10 @@ const CHARACTER_LINES = {
     { speaker: 'risol', text: 'この棚、まだ何もないね。別に寂しくはないけど。', icon: CHAR.risolArms },
     { speaker: 'arte', text: 'この種類のもの、見つけたらここに置いておこうね。', icon: CHAR.arteSort },
   ],
+  emptyFavorites: [
+    { speaker: 'arte', text: 'よく使うものの ☆ を押すと、ここに集まるよ。', icon: CHAR.arteHappy },
+    { speaker: 'risol', text: '毎回さがすの面倒でしょ。☆ 押しときなよ。', icon: CHAR.risolArms },
+  ],
   emptyShopping: [
     { speaker: 'arte', text: '必要なものが出たら、わたしが一緒に確認するね', icon: CHAR.arteBasket },
     { speaker: 'arte', text: '買うものがない日は、ちょっと安心だね。', icon: CHAR.arteHappy },
@@ -175,6 +182,8 @@ let expandedMenuIds = new Set();
 let choosingIngredientRowId = null;
 let ingredientPickerQuery = '';
 let pendingMenuIngredientLink = null;
+let itemLocationDraft = [];      // [{ category, subcategory }] 先頭がメインの置き場所
+let itemFavoriteDraft = false;
 
 // ─────────────────────────────────────────────
 //  状態の永続化
@@ -184,7 +193,7 @@ function createInitialState() {
     items: [],
     menus: [],
     shoppingList: [],
-    settings: { driveClientId: '', driveFileId: null },
+    settings: { driveClientId: '', driveFileId: null, startOnFavorites: true },
   };
 }
 
@@ -193,7 +202,8 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return createInitialState();
     const s = JSON.parse(raw);
-    if (!s.settings)      s.settings = { driveClientId: '', driveFileId: null };
+    if (!s.settings)      s.settings = { driveClientId: '', driveFileId: null, startOnFavorites: true };
+    if (s.settings.startOnFavorites === undefined) s.settings.startOnFavorites = true;
     if (!s.shoppingList)  s.shoppingList = [];
     if (!s.items)         s.items = [];
     if (!s.menus)         s.menus = [];
@@ -396,6 +406,45 @@ function subcatInfo(category, subcategory) {
   return subcategoryList(category).find(s => s.id === subcategory) || subcategoryList(category)[0] || { id: 'other', label: 'その他', icon: '✨' };
 }
 
+/* ── 置き場所（複数カテゴリ対応） ── */
+function locationKey(loc) {
+  return `${loc.category}/${loc.subcategory}`;
+}
+
+function normalizeLocation(loc) {
+  if (!loc) return null;
+  const category = catInfo(loc.category === 'bathroom' ? 'daily' : loc.category).id;
+  let subcategory = loc.subcategory;
+  if (category === 'daily' && subcategory === 'other') subcategory = 'bath';
+  if (!subcategoryList(category).some(s => s.id === subcategory)) subcategory = defaultSubcategory(category);
+  return { category, subcategory };
+}
+
+function dedupeLocations(locations) {
+  const seen = new Set();
+  const result = [];
+  for (const loc of locations) {
+    const normalized = normalizeLocation(loc);
+    if (!normalized) continue;
+    const key = locationKey(normalized);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(normalized);
+  }
+  return result;
+}
+
+function itemLocations(item) {
+  if (Array.isArray(item.locations) && item.locations.length) return item.locations;
+  return [{ category: item.category, subcategory: item.subcategory }];
+}
+
+function locationLabel(loc) {
+  const cat = catInfo(loc.category);
+  const sub = subcatInfo(loc.category, loc.subcategory);
+  return `${cat.icon}${cat.label} / ${sub.icon}${sub.label}`;
+}
+
 function normalizeItem(item) {
   if (!item) return item;
   if (item.category === 'bathroom') item.category = 'daily';
@@ -403,6 +452,15 @@ function normalizeItem(item) {
   item.category = catInfo(item.category).id;
   if (!item.subcategory) item.subcategory = defaultSubcategory(item.category);
   if (item.category === 'daily' && item.subcategory === 'other') item.subcategory = 'bath';
+  // 置き場所は locations が正。無い旧データは category/subcategory から作る
+  const rawLocations = Array.isArray(item.locations) && item.locations.length
+    ? item.locations
+    : [{ category: item.category, subcategory: item.subcategory }];
+  item.locations = dedupeLocations(rawLocations);
+  if (!item.locations.length) item.locations = [normalizeLocation({ category: item.category, subcategory: item.subcategory })];
+  item.category    = item.locations[0].category;
+  item.subcategory = item.locations[0].subcategory;
+  item.favorite = item.favorite === true;
   if (!item.dateType) item.dateType = 'expiry';
   if (item.dateType !== 'start') item.dateType = 'expiry';
   if (!item.stockMode) item.stockMode = 'count';
@@ -469,6 +527,26 @@ function isItemLow(item) {
   return countLow || amountLow;
 }
 
+/* ── 使い切り判定と期限の自動リセット ── */
+function isItemEmpty(item) {
+  const qty = Number(item.quantity) || 0;
+  if (item.stockMode === 'amount') {
+    return qty <= 0 && (Number(item.amountPercent) || 0) <= 0;
+  }
+  return qty <= 0;
+}
+
+// 使い切って0になったら消費期限を自動で消す（使用開始日は残す）
+function clearExpiryWhenEmpty(item) {
+  if (!isItemEmpty(item)) return false;
+  if (item.dateType !== 'expiry') return false;
+  if (!itemDate(item)) return false;
+  item.expiryDate = null;
+  item.date = null;
+  item.expiryClearedAt = new Date().toISOString();
+  return true;
+}
+
 function $(id)  { return document.getElementById(id); }
 
 function esc(str) {
@@ -478,6 +556,13 @@ function esc(str) {
 
 function pick(list) {
   return list[Math.floor(Math.random() * list.length)];
+}
+
+// 同じ品目では毎回同じ絵柄になるように（再描画でチラつかせない）
+function pickFor(list, seed) {
+  let hash = 0;
+  for (let i = 0; i < String(seed).length; i++) hash = (hash * 31 + String(seed).charCodeAt(i)) >>> 0;
+  return list[hash % list.length];
 }
 
 function lineText(line, value) {
@@ -592,10 +677,24 @@ function compareItems(a, b) {
   return dateA - dateB || lowA - lowB || a.name.localeCompare(b.name, 'ja');
 }
 
+function renderCategoryChips() {
+  const chips = $('catChips');
+  if (!chips) return;
+  const favCount = state.items.filter(i => i.favorite).length;
+  const options = [FAVORITE_FILTER, ...CATEGORIES];
+  const scrollLeft = chips.scrollLeft;
+  chips.innerHTML = options.map(c => {
+    const badge = c.id === 'fav' && favCount ? `<span class="chip-count">${favCount}</span>` : '';
+    return `<button class="cat-chip ${c.id === 'fav' ? 'fav-chip ' : ''}${c.id === currentCategory ? 'active' : ''}"
+      data-cat="${c.id}" onclick="switchCategory('${c.id}')">${c.icon} ${c.label}${badge}</button>`;
+  }).join('');
+  chips.scrollLeft = scrollLeft;
+}
+
 function renderSubcategoryChips() {
   const chips = $('subcatChips');
   if (!chips) return;
-  if (currentCategory === 'all') {
+  if (currentCategory === 'all' || currentCategory === 'fav') {
     chips.innerHTML = '';
     chips.classList.add('hidden');
     currentSubcategory = 'all';
@@ -610,24 +709,68 @@ function renderSubcategoryChips() {
 }
 
 /* ── 在庫一覧 ── */
+// 品目が現在の絞り込みに含まれるか（複数の置き場所のどれかが一致すればOK）
+function itemMatchesFilter(item, category = currentCategory, subcategory = currentSubcategory) {
+  if (category === 'fav') return item.favorite === true;
+  if (category === 'all') return true;
+  return itemLocations(item).some(loc =>
+    loc.category === category && (subcategory === 'all' || loc.subcategory === subcategory));
+}
+
+function stockCardHtml(item) {
+  const cat    = catInfo(item.category);
+  const locs   = itemLocations(item);
+  const expCl  = itemDateClass(item);
+  const expLb  = itemDateLabel(item);
+  const isLow  = isItemLow(item);
+  const alertIcon = expCl === 'expired' || expCl === 'expiring-soon'
+    ? pickFor([CHAR.risolWarn, CHAR.risolComplain, CHAR.arteCheck], item.id)
+    : isLow ? pickFor([CHAR.risolThink, CHAR.risolAnnoyed, CHAR.arteBasket], item.id + 'low') : '';
+  // 置き場所はメインだけ出し、複数あるときは「＋n」で示す（全部はタップして編集画面で）
+  const mainSub = subcatInfo(locs[0].category, locs[0].subcategory);
+  const locHtml = `<span class="item-loc">${mainSub.icon} ${esc(mainSub.label)}</span>`
+    + (locs.length > 1 ? `<span class="item-loc-more" title="${esc(locs.map(locationLabel).join(' / '))}">＋${locs.length - 1}</span>` : '');
+  return `
+      <div class="item-card cat-${cat.id} ${expCl} ${isLow ? 'low-stock' : ''} ${item.favorite ? 'is-favorite' : ''}"
+        data-id="${item.id}" role="button" tabindex="0" aria-label="${esc(item.name)}を編集">
+        <div class="item-cat-icon">${cat.icon}</div>
+        <div class="item-body">
+          <div class="item-name">${item.favorite ? '<span class="item-fav-mark">⭐</span>' : ''}${esc(item.name)}</div>
+          <div class="item-subcat">${locHtml}</div>
+          ${expLb ? `<div class="item-expiry ${expCl}">${expLb}</div>` : ''}
+          ${item.note ? `<div class="item-note">${esc(item.note)}</div>` : ''}
+          ${item.locationPhoto ? `<img class="item-location-photo" src="${item.locationPhoto}" alt="収納場所の写真">` : ''}
+          ${isLow ? `<div class="item-low">⚠️ 在庫少（最小${item.minQuantity}${esc(item.unit)}）</div>` : ''}
+        </div>
+        ${alertIcon ? `<img class="item-alert-character" src="${alertIcon}" alt="">` : ''}
+        <div class="item-qty-ctrl">
+          <button class="qty-btn" data-action="dec" aria-label="減らす">−</button>
+          <span class="qty-value ${item.stockMode === 'amount' ? 'amount-mode' : ''}">${itemStockLabel(item)}</span>
+          <button class="qty-btn" data-action="inc" aria-label="増やす">＋</button>
+        </div>
+        <button class="item-fav-btn ${item.favorite ? 'on' : ''}" data-action="fav"
+          aria-pressed="${item.favorite ? 'true' : 'false'}"
+          aria-label="${item.favorite ? 'お気に入りから外す' : 'お気に入りに登録'}">${item.favorite ? '⭐' : '☆'}</button>
+      </div>`;
+}
+
 function renderStock() {
   renderCharacterTip();
+  renderCategoryChips();
   renderSubcategoryChips();
   const list = $('stockList');
   if (!list) return;
 
-  let items = currentCategory === 'all'
-    ? [...state.items]
-    : state.items.filter(i => i.category === currentCategory);
-  if (currentSubcategory !== 'all') {
-    items = items.filter(i => i.subcategory === currentSubcategory);
-  }
   const query = stockSearchQuery.trim().toLocaleLowerCase('ja');
-  if (query) {
-    items = items.filter(i => `${i.name} ${i.note || ''}`.toLocaleLowerCase('ja').includes(query));
-  }
+  // 検索中は絞り込みを越えて全品目から探す（フィルタのせいで見つからないのを防ぐ）
+  let items = query
+    ? state.items.filter(i => `${i.name} ${i.note || ''}`.toLocaleLowerCase('ja').includes(query))
+    : state.items.filter(i => itemMatchesFilter(i));
 
   items.sort(compareItems);
+  const searchNote = query && currentCategory !== 'all'
+    ? '<div class="search-scope-note">🔍 すべての分類から検索しています</div>'
+    : '';
 
   if (!items.length) {
     if (query) {
@@ -635,6 +778,18 @@ function renderStock() {
         <div class="empty-state character-empty">
           <img class="empty-character" src="${CHAR.risolThink}" alt="">
           <p>「${esc(stockSearchQuery.trim())}」に一致する品目はありません</p>
+          <button class="empty-cta" onclick="clearStockSearch()">検索をクリア</button>
+        </div>`;
+      return;
+    }
+    if (currentCategory === 'fav') {
+      const favLine = lineFor('emptyFavorites');
+      list.innerHTML = `
+        <div class="empty-state character-empty">
+          <img class="empty-character" src="${favLine.icon}" alt="">
+          <p>お気に入りはまだありません</p>
+          <p class="empty-hint">${esc(favLine.text)}</p>
+          <button class="empty-cta" onclick="switchCategory('all')">📋 すべての在庫を見る</button>
         </div>`;
       return;
     }
@@ -644,39 +799,32 @@ function renderStock() {
         <img class="empty-character" src="${emptyLine.icon}" alt="">
         <p>${currentCategory === 'all' ? 'まだ品目がありません' : 'この種類の品目はありません'}</p>
         <p class="empty-hint">${esc(emptyLine.text)}</p>
+        <button class="empty-cta" onclick="openAddItem()">＋ 品目を追加する</button>
       </div>`;
     return;
   }
 
-  list.innerHTML = items.map(item => {
-    const cat   = catInfo(item.category);
-    const subcat = subcatInfo(item.category, item.subcategory);
-    const expCl = itemDateClass(item);
-    const expLb = itemDateLabel(item);
-    const isLow = isItemLow(item);
-    const alertIcon = expCl === 'expired' || expCl === 'expiring-soon'
-      ? pick([CHAR.risolWarn, CHAR.risolComplain, CHAR.arteCheck])
-      : isLow ? pick([CHAR.risolThink, CHAR.risolAnnoyed, CHAR.arteBasket]) : '';
-    return `
-      <div class="item-card cat-${cat.id} ${expCl} ${isLow ? 'low-stock' : ''}" data-id="${item.id}">
-        <div class="item-cat-icon">${cat.icon}</div>
-        <div class="item-body">
-          <div class="item-name">${esc(item.name)}</div>
-          <div class="item-subcat">${subcat.icon} ${esc(subcat.label)}</div>
-          ${expLb ? `<div class="item-expiry ${expCl}">${expLb}</div>` : ''}
-          ${item.note ? `<div class="item-note">${esc(item.note)}</div>` : ''}
-          ${item.locationPhoto ? `<img class="item-location-photo" src="${item.locationPhoto}" alt="収納場所の写真">` : ''}
-          ${isLow ? `<div class="item-low">⚠️ 在庫少（最小${item.minQuantity}${esc(item.unit)}）</div>` : ''}
-        </div>
-        ${alertIcon ? `<img class="item-alert-character" src="${alertIcon}" alt="">` : ''}
-        <div class="item-qty-ctrl">
-          <button class="qty-btn" onclick="changeQty('${item.id}',-1)">−</button>
-          <span class="qty-value ${item.stockMode === 'amount' ? 'amount-mode' : ''}">${itemStockLabel(item)}</span>
-          <button class="qty-btn" onclick="changeQty('${item.id}',1)">＋</button>
-        </div>
-        <button class="item-edit-btn" onclick="openEditItem('${item.id}')" aria-label="編集">✏️</button>
-      </div>`;
-  }).join('');
+  list.innerHTML = searchNote + items.map(stockCardHtml).join('');
+}
+
+function clearStockSearch() {
+  stockSearchQuery = '';
+  const input = $('stockSearch');
+  if (input) input.value = '';
+  renderStock();
+}
+
+// お気に入りの登録／解除
+function toggleFavorite(itemId) {
+  const item = state.items.find(i => i.id === itemId);
+  if (!item) return;
+  item.favorite = !item.favorite;
+  item.updatedAt = new Date().toISOString();
+  saveState();
+  showToast(item.favorite ? `⭐ ${item.name} をお気に入りに登録しました` : 'お気に入りから外しました');
+  // お気に入り表示中に外したらカードごと消えるので、一覧を作り直す
+  if (currentCategory === 'fav') renderStock();
+  else { updateStockCard(item); renderCategoryChips(); }
 }
 
 /* ── 料理メニュー ── */
@@ -719,6 +867,7 @@ function renderMenus() {
         <img class="empty-character" src="${CHAR.coupleBasket}" alt="">
         <p>まだメニューがありません</p>
         <p class="empty-hint">作りたい料理を登録して、食材を確認しようね。</p>
+        <button class="empty-cta" onclick="openAddMenu()">＋ メニューを追加する</button>
       </div>`;
     return;
   }
@@ -769,6 +918,9 @@ function renderShopping() {
   const list = $('shoppingList');
   if (!list) return;
 
+  const checkedCount = state.shoppingList.filter(s => s.checked).length;
+  $('clearCheckedBtn')?.classList.toggle('hidden', !checkedCount);
+
   if (!state.shoppingList.length) {
     const emptyLine = lineFor('emptyShopping');
     list.innerHTML = `
@@ -776,6 +928,7 @@ function renderShopping() {
         <img class="empty-character" src="${emptyLine.icon}" alt="">
         <p>買い物リストは空です</p>
         <p class="empty-hint">${esc(emptyLine.text)}</p>
+        <button class="empty-cta" onclick="openAddShopItem()">＋ 買うものを追加する</button>
       </div>`;
     return;
   }
@@ -804,7 +957,15 @@ function renderShopping() {
 }
 
 /* ── 設定 ── */
+function toggleStartOnFavorites(checked) {
+  state.settings.startOnFavorites = Boolean(checked);
+  persistLocal();
+  showToast(checked ? '起動時にお気に入りを表示します ⭐' : '起動時はすべての在庫を表示します');
+}
+
 function renderSettings() {
+  const favToggle = $('startOnFavorites');
+  if (favToggle) favToggle.checked = state.settings.startOnFavorites !== false;
   const inp = $('settingsClientId');
   if (inp) inp.value = state.settings.driveClientId || '';
   const st = $('driveStatusText');
@@ -855,7 +1016,6 @@ function switchTab(tab) {
 function switchCategory(cat) {
   currentCategory = cat;
   currentSubcategory = 'all';
-  document.querySelectorAll('.cat-chip').forEach(c => c.classList.toggle('active', c.dataset.cat === cat));
   renderStock();
 }
 
@@ -868,12 +1028,6 @@ function switchSubcategory(subcat) {
 function switchSort(sort) {
   currentSort = sort;
   renderStock();
-}
-
-function updateSubcategorySelect(category) {
-  const sel = $('itemSubcategory');
-  if (!sel) return;
-  sel.innerHTML = subcategoryList(category).map(s => `<option value="${s.id}">${s.icon} ${s.label}</option>`).join('');
 }
 
 function updateDateTypeLabel() {
@@ -993,10 +1147,13 @@ function changeQty(itemId, delta) {
     item.quantity = Math.max(0, item.quantity + delta);
   }
   item.updatedAt = new Date().toISOString();
+  // 使い切って0になったら消費期限を自動リセット
+  const cleared = clearExpiryWhenEmpty(item);
   saveState();
   // 並び替えでカードが飛ばないよう、該当カードだけ更新する
   updateStockCard(item);
   renderCharacterTip();
+  if (cleared) showToast(`${item.name} を使い切ったので消費期限を消しました 🗓️`);
   // 在庫が最小数以下になったらバッジ更新
   updateShoppingBadge();
 }
@@ -1004,17 +1161,7 @@ function changeQty(itemId, delta) {
 function updateStockCard(item) {
   const card = document.querySelector(`.item-card[data-id="${item.id}"]`);
   if (!card) { renderStock(); return; }
-  const qtyEl = card.querySelector('.qty-value');
-  if (qtyEl) qtyEl.innerHTML = itemStockLabel(item);
-  const isLow = isItemLow(item);
-  card.classList.toggle('low-stock', isLow);
-  const lowEl = card.querySelector('.item-low');
-  if (isLow && !lowEl) {
-    card.querySelector('.item-body')?.insertAdjacentHTML('beforeend',
-      `<div class="item-low">⚠️ 在庫少（最小${item.minQuantity}${esc(item.unit)}）</div>`);
-  } else if (!isLow && lowEl) {
-    lowEl.remove();
-  }
+  card.outerHTML = stockCardHtml(item);
 }
 
 function changeAmountStock(item, delta) {
@@ -1043,14 +1190,99 @@ function changeAmountStock(item, delta) {
   }
 }
 
+/* ── 置き場所（複数）の編集 ── */
+function setItemLocationDraft(locations) {
+  itemLocationDraft = dedupeLocations(locations);
+  if (!itemLocationDraft.length) itemLocationDraft = [normalizeLocation({ category: 'refrigerator' })];
+  renderItemLocationChips();
+}
+
+function renderItemLocationChips() {
+  const wrap = $('itemLocationChips');
+  if (!wrap) return;
+  wrap.innerHTML = itemLocationDraft.map((loc, index) => `
+    <span class="location-chip ${index === 0 ? 'main' : ''}">
+      <button type="button" class="location-chip-label" onclick="makeMainLocation(${index})"
+        title="${index === 0 ? 'メインの置き場所' : 'タップでメインにする'}">${index === 0 ? '主 ' : ''}${locationLabel(loc)}</button>
+      ${itemLocationDraft.length > 1
+        ? `<button type="button" class="location-chip-remove" onclick="removeItemLocation(${index})" aria-label="この置き場所を外す">✕</button>`
+        : ''}
+    </span>`).join('');
+}
+
+function makeMainLocation(index) {
+  if (index <= 0 || index >= itemLocationDraft.length) return;
+  const [loc] = itemLocationDraft.splice(index, 1);
+  itemLocationDraft.unshift(loc);
+  renderItemLocationChips();
+}
+
+function removeItemLocation(index) {
+  if (itemLocationDraft.length <= 1) return;
+  itemLocationDraft.splice(index, 1);
+  renderItemLocationChips();
+}
+
+function toggleLocationPicker(forceOpen = null) {
+  const panel = $('itemLocationPicker');
+  if (!panel) return;
+  const open = forceOpen === null ? panel.classList.contains('hidden') : forceOpen;
+  panel.classList.toggle('hidden', !open);
+  if (open) updateLocationPickerSubcats();
+}
+
+function updateLocationPickerSubcats() {
+  const catSel = $('itemLocCategory');
+  const subSel = $('itemLocSubcategory');
+  if (!catSel || !subSel) return;
+  subSel.innerHTML = subcategoryList(catSel.value)
+    .map(s => `<option value="${s.id}">${s.icon} ${s.label}</option>`).join('');
+}
+
+function addItemLocation() {
+  const loc = normalizeLocation({
+    category:    $('itemLocCategory')?.value,
+    subcategory: $('itemLocSubcategory')?.value,
+  });
+  if (!loc) return;
+  if (itemLocationDraft.some(l => locationKey(l) === locationKey(loc))) {
+    showToast('その置き場所はすでに追加されています', true);
+    return;
+  }
+  itemLocationDraft.push(loc);
+  renderItemLocationChips();
+  toggleLocationPicker(false);
+}
+
+/* ── お気に入り（モーダル内） ── */
+function toggleDraftFavorite() {
+  itemFavoriteDraft = !itemFavoriteDraft;
+  renderDraftFavorite();
+}
+
+function renderDraftFavorite() {
+  const btn = $('itemFavToggle');
+  if (!btn) return;
+  btn.classList.toggle('on', itemFavoriteDraft);
+  btn.setAttribute('aria-pressed', itemFavoriteDraft ? 'true' : 'false');
+  btn.textContent = itemFavoriteDraft ? '⭐ お気に入り登録中' : '☆ お気に入りに登録';
+}
+
 function openAddItem(menuLink = null) {
   pendingMenuIngredientLink = menuLink;
   editingItemId = null;
   $('modalTitle').textContent = '品目を追加';
   $('itemName').value     = '';
-  $('itemCategory').value = currentCategory !== 'all' ? currentCategory : 'refrigerator';
-  updateSubcategorySelect($('itemCategory').value);
-  $('itemSubcategory').value = currentSubcategory !== 'all' ? currentSubcategory : defaultSubcategory($('itemCategory').value);
+  const baseCategory = currentCategory !== 'all' && currentCategory !== 'fav' ? currentCategory : 'refrigerator';
+  setItemLocationDraft([{
+    category: baseCategory,
+    subcategory: currentSubcategory !== 'all' ? currentSubcategory : defaultSubcategory(baseCategory),
+  }]);
+  toggleLocationPicker(false);
+  itemFavoriteDraft = false;
+  renderDraftFavorite();
+  const advanced = $('itemAdvanced');
+  if (advanced) advanced.open = false;
   $('itemStockMode').value = 'count';
   $('itemAmountPercent').value = '100';
   $('itemMinAmountPercent').value = '10';
@@ -1090,9 +1322,16 @@ function openEditItem(itemId) {
   editingItemId = itemId;
   $('modalTitle').textContent = '品目を編集';
   $('itemName').value     = item.name;
-  $('itemCategory').value = item.category;
-  updateSubcategorySelect(item.category);
-  $('itemSubcategory').value = item.subcategory || defaultSubcategory(item.category);
+  setItemLocationDraft(itemLocations(item));
+  toggleLocationPicker(false);
+  itemFavoriteDraft = item.favorite === true;
+  renderDraftFavorite();
+  const advanced = $('itemAdvanced');
+  if (advanced) {
+    // 何か設定済みなら詳細を開いた状態で見せる
+    advanced.open = Boolean(itemDate(item) || item.note || item.locationPhoto
+      || item.stockMode === 'amount' || Number(item.minQuantity) !== 1);
+  }
   $('itemStockMode').value = item.stockMode || 'count';
   $('itemAmountPercent').value = Number.isFinite(Number(item.amountPercent)) ? item.amountPercent : 100;
   $('itemMinAmountPercent').value = Number.isFinite(Number(item.minAmountPercent)) ? item.minAmountPercent : 10;
@@ -1122,13 +1361,19 @@ function saveItem() {
   const qty    = parseFloat($('itemQty').value)    || 0;
   const minQty = parseFloat($('itemMinQty').value) || 0;
   const now    = new Date().toISOString();
+  const locations = dedupeLocations(itemLocationDraft);
+  if (!locations.length) { showToast('置き場所を1つ以上えらんでください', true); return; }
+  let savedItem = null;
 
   if (editingItemId) {
     const item = state.items.find(i => i.id === editingItemId);
     if (item) {
+      savedItem        = item;
       item.name        = name;
-      item.category    = $('itemCategory').value;
-      item.subcategory = $('itemSubcategory').value || defaultSubcategory(item.category);
+      item.locations   = locations;
+      item.category    = locations[0].category;
+      item.subcategory = locations[0].subcategory;
+      item.favorite    = itemFavoriteDraft;
       item.stockMode        = $('itemStockMode').value;
       item.amountPercent    = item.stockMode === 'amount' ? Math.min(100, Math.max(0, parseFloat($('itemAmountPercent').value) || 0)) : null;
       item.minAmountPercent = item.stockMode === 'amount' ? Math.min(100, Math.max(0, parseFloat($('itemMinAmountPercent').value) || 10)) : null;
@@ -1144,8 +1389,10 @@ function saveItem() {
   } else {
     const addedItem = {
       id: uid(), name,
-      category:    $('itemCategory').value,
-      subcategory: $('itemSubcategory').value || defaultSubcategory($('itemCategory').value),
+      locations,
+      category:    locations[0].category,
+      subcategory: locations[0].subcategory,
+      favorite:    itemFavoriteDraft,
       stockMode:        $('itemStockMode').value,
       amountPercent:    $('itemStockMode').value === 'amount' ? Math.min(100, Math.max(0, parseFloat($('itemAmountPercent').value) || 0)) : null,
       minAmountPercent: $('itemStockMode').value === 'amount' ? Math.min(100, Math.max(0, parseFloat($('itemMinAmountPercent').value) || 10)) : null,
@@ -1160,6 +1407,7 @@ function saveItem() {
       updatedAt:   now,
     };
     state.items.push(addedItem);
+    savedItem = addedItem;
     if (pendingMenuIngredientLink) {
       const menu = state.menus.find(entry => entry.id === pendingMenuIngredientLink.menuId);
       const ingredient = menu?.ingredients[pendingMenuIngredientLink.ingredientIndex];
@@ -1173,12 +1421,20 @@ function saveItem() {
     }
   }
 
+  const wasEditing = Boolean(editingItemId);
   pendingMenuIngredientLink = null;
   closeModal('itemModal');
   saveState();
+  // 保存した品目が今の絞り込みで隠れてしまうときは、見える場所へ戻す
+  if (savedItem && currentTab === 'stock' && !itemMatchesFilter(savedItem)) {
+    currentCategory = savedItem.category;
+    currentSubcategory = 'all';
+    stockSearchQuery = '';
+    if ($('stockSearch')) $('stockSearch').value = '';
+  }
   renderAll();
   updateShoppingBadge();
-  showToast(editingItemId ? '更新しました ✅' : '追加しました ✅');
+  showToast(wasEditing ? '更新しました ✅' : '追加しました ✅');
 }
 
 function deleteItem() {
@@ -1482,6 +1738,7 @@ function toggleShopItem(shopId) {
   if (!shop) return;
   shop.checked = !shop.checked;
 
+  let clearedItem = null;
   if (shop.itemId) {
     const item = state.items.find(i => i.id === shop.itemId);
     if (item) {
@@ -1489,12 +1746,14 @@ function toggleShopItem(shopId) {
       item.quantity  += shop.checked ? shop.quantity : -shop.quantity;
       item.quantity   = Math.max(0, item.quantity);
       item.updatedAt  = new Date().toISOString();
+      if (clearExpiryWhenEmpty(item)) clearedItem = item;
     }
   }
 
   saveState();
   renderShopping();
   updateShoppingBadge();
+  if (clearedItem) showToast(`${clearedItem.name} の在庫が0になったので消費期限を消しました 🗓️`);
 }
 
 function deleteShopItem(shopId) {
@@ -1776,19 +2035,69 @@ async function triggerInstall() {
 }
 
 // ─────────────────────────────────────────────
+//  在庫カードの操作（カードをタップ＝編集）
+// ─────────────────────────────────────────────
+function setupStockListActions() {
+  const list = $('stockList');
+  if (!list) return;
+  list.addEventListener('click', e => {
+    const card = e.target.closest('.item-card');
+    if (!card) return;
+    const itemId = card.dataset.id;
+    const action = e.target.closest('[data-action]')?.dataset.action;
+    if (action === 'inc')  { changeQty(itemId, 1);  return; }
+    if (action === 'dec')  { changeQty(itemId, -1); return; }
+    if (action === 'fav')  { toggleFavorite(itemId); return; }
+    openEditItem(itemId);
+  });
+  list.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const card = e.target.closest('.item-card');
+    if (!card || e.target !== card) return;
+    e.preventDefault();
+    openEditItem(card.dataset.id);
+  });
+}
+
+// ─────────────────────────────────────────────
+//  モーダルのキーボード操作
+// ─────────────────────────────────────────────
+const MODAL_SAVE_ACTIONS = { itemModal: saveItem, menuModal: saveMenu, shopModal: saveShopItem };
+
+function openModalId() {
+  return document.querySelector('.modal-overlay.open')?.id || null;
+}
+
+function setupModalKeys() {
+  document.addEventListener('keydown', e => {
+    const modalId = openModalId();
+    if (!modalId) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeModal(modalId);
+      return;
+    }
+    // 1行テキスト入力での Enter は保存（テキストエリアや検索欄は除く）
+    if (e.key === 'Enter' && e.target instanceof HTMLInputElement
+        && ['text', 'number', 'date', 'datetime-local'].includes(e.target.type)) {
+      e.preventDefault();
+      MODAL_SAVE_ACTIONS[modalId]?.();
+    }
+  });
+}
+
+// ─────────────────────────────────────────────
 //  初期化
 // ─────────────────────────────────────────────
 function init() {
   registerSW();
 
-  // カテゴリチップを生成
-  const chips = $('catChips');
-  if (chips) {
-    chips.innerHTML = CATEGORIES.map(c =>
-      `<button class="cat-chip ${c.id === 'all' ? 'active' : ''}" data-cat="${c.id}"
-         onclick="switchCategory('${c.id}')">${c.icon} ${c.label}</button>`
-    ).join('');
+  // 起動時にお気に入りを最初に表示（お気に入りが1件でもあるときだけ）
+  if (state.settings.startOnFavorites !== false && state.items.some(i => i.favorite)) {
+    currentCategory = 'fav';
   }
+  renderCategoryChips();
+  setupStockListActions();
 
   const stockSearch = $('stockSearch');
   if (stockSearch) {
@@ -1805,15 +2114,13 @@ function init() {
     sortSelect.addEventListener('change', () => switchSort(sortSelect.value));
   }
 
-  const itemCategory = $('itemCategory');
-  if (itemCategory) {
-    itemCategory.innerHTML = CATEGORIES.filter(c => c.id !== 'all')
+  // 置き場所ピッカーのカテゴリ選択肢
+  const locCategory = $('itemLocCategory');
+  if (locCategory) {
+    locCategory.innerHTML = CATEGORIES.filter(c => c.id !== 'all')
       .map(c => `<option value="${c.id}">${c.icon} ${c.label}</option>`).join('');
-    itemCategory.addEventListener('change', () => {
-      updateSubcategorySelect(itemCategory.value);
-      $('itemSubcategory').value = defaultSubcategory(itemCategory.value);
-    });
-    updateSubcategorySelect(itemCategory.value || 'refrigerator');
+    locCategory.addEventListener('change', updateLocationPickerSubcats);
+    updateLocationPickerSubcats();
   }
 
   $('itemDateType')?.addEventListener('change', updateDateTypeLabel);
@@ -1832,6 +2139,7 @@ function init() {
 
   // 同期ボタン
   $('syncBtn')?.addEventListener('click', syncNow);
+  setupModalKeys();
   setupCharacterPeek();
 
   // 初期バッジ

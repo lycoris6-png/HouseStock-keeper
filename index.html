@@ -63,13 +63,22 @@
   <div class="tab-content" data-tab="shopping">
     <div class="shopping-header">
       <h2>🛒 買い物リスト</h2>
-      <button class="clear-checked-btn" onclick="clearCheckedShopItems()">購入済みを削除</button>
+      <button id="clearCheckedBtn" class="clear-checked-btn hidden" onclick="clearCheckedShopItems()">購入済みを削除</button>
     </div>
     <div id="shoppingList" class="shopping-list"></div>
   </div>
 
   <!-- ─── 設定タブ ─── -->
   <div class="tab-content" data-tab="settings">
+    <div class="settings-section">
+      <h2>⭐ 表示のカスタマイズ</h2>
+      <label class="settings-toggle" for="startOnFavorites">
+        <input type="checkbox" id="startOnFavorites" onchange="toggleStartOnFavorites(this.checked)">
+        <span>起動時に「お気に入り」を最初に表示する</span>
+      </label>
+      <p class="hint">お気に入りが1件もないときは、すべての在庫を表示します。品目カードの ☆ からいつでも登録できます。</p>
+    </div>
+
     <div class="settings-section">
       <h2>☁️ Google Drive 連携</h2>
 
@@ -169,29 +178,22 @@
         <label for="itemName">品名 *</label>
         <input type="text" id="itemName" placeholder="例: 牛乳" autocomplete="off">
       </div>
+
+      <button type="button" id="itemFavToggle" class="fav-toggle" aria-pressed="false"
+        onclick="toggleDraftFavorite()">☆ お気に入りに登録</button>
+
       <div class="form-row">
-        <label for="itemCategory">カテゴリ</label>
-        <select id="itemCategory"></select>
+        <label>置き場所（複数の分類に登録できます）</label>
+        <div id="itemLocationChips" class="location-chips"></div>
+        <button type="button" class="btn-soft" onclick="toggleLocationPicker()">＋ 置き場所を追加</button>
+        <div id="itemLocationPicker" class="location-picker hidden">
+          <select id="itemLocCategory" aria-label="追加するカテゴリ"></select>
+          <select id="itemLocSubcategory" aria-label="追加する小分類"></select>
+          <button type="button" class="btn-primary" onclick="addItemLocation()">追加</button>
+        </div>
+        <p class="field-hint">先頭が「主」の置き場所です。別の場所のチップをタップすると主に変わります。</p>
       </div>
-      <div class="form-row">
-        <label for="itemSubcategory">小分類</label>
-        <select id="itemSubcategory"></select>
-      </div>
-      <div class="form-row">
-        <label for="itemStockMode">管理方法</label>
-        <select id="itemStockMode">
-          <option value="count">残数のみ</option>
-          <option value="amount">残量＋残数</option>
-        </select>
-      </div>
-      <div id="itemAmountRow" class="form-row hidden">
-        <label for="itemAmountPercent">現在の残量（%）</label>
-        <input type="number" id="itemAmountPercent" min="0" max="100" step="1" value="100">
-      </div>
-      <div id="itemMinAmountRow" class="form-row hidden">
-        <label for="itemMinAmountPercent">買い物リスト入り：残量がこの%以下かつ在庫0で</label>
-        <input type="number" id="itemMinAmountPercent" min="0" max="100" step="5" value="10">
-      </div>
+
       <div class="form-row-2">
         <div class="form-row">
           <label for="itemQty">現在の在庫数</label>
@@ -202,37 +204,59 @@
           <select id="itemUnit" class="unit-select"></select>
         </div>
       </div>
-      <div class="form-row">
-        <label for="itemMinQty">最小在庫数（これ以下で買い物リストへ）</label>
-        <input type="number" id="itemMinQty" min="0" step="0.5" value="1">
-      </div>
-      <div class="form-row-2">
-        <div class="form-row">
-          <label for="itemDateType">日付の種類</label>
-          <select id="itemDateType">
-            <option value="expiry">消費期限</option>
-            <option value="start">使用開始日時</option>
-          </select>
-        </div>
-        <div class="form-row">
-          <label for="itemExpiry" id="itemDateLabel">消費期限</label>
-          <input type="date" id="itemExpiry">
-        </div>
-      </div>
-      <div class="form-row">
-        <label for="itemNote">メモ</label>
-        <input type="text" id="itemNote" placeholder="例: 洗面台の下、開封済みなど">
-      </div>
-      <div class="form-row">
-        <label for="itemPhoto">収納場所の写真</label>
-        <div class="photo-field">
-          <input type="file" id="itemPhoto" accept="image/*">
-          <div id="itemPhotoPreview" class="photo-preview empty">
-            <span>写真なし</span>
+
+      <details id="itemAdvanced" class="form-advanced">
+        <summary>詳しく設定する（期限・最小在庫・メモ・写真）</summary>
+        <div class="form-advanced-body">
+          <div class="form-row-2">
+            <div class="form-row">
+              <label for="itemDateType">日付の種類</label>
+              <select id="itemDateType">
+                <option value="expiry">消費期限</option>
+                <option value="start">使用開始日時</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label for="itemExpiry" id="itemDateLabel">消費期限</label>
+              <input type="date" id="itemExpiry">
+            </div>
           </div>
-          <button type="button" id="removeItemPhotoBtn" class="btn-soft hidden" onclick="removeItemPhoto()">写真を外す</button>
+          <p class="field-hint">使い切って在庫が0になると、消費期限は自動で消えます。</p>
+          <div class="form-row">
+            <label for="itemStockMode">管理方法</label>
+            <select id="itemStockMode">
+              <option value="count">残数のみ</option>
+              <option value="amount">残量＋残数</option>
+            </select>
+          </div>
+          <div id="itemAmountRow" class="form-row hidden">
+            <label for="itemAmountPercent">現在の残量（%）</label>
+            <input type="number" id="itemAmountPercent" min="0" max="100" step="1" value="100">
+          </div>
+          <div id="itemMinAmountRow" class="form-row hidden">
+            <label for="itemMinAmountPercent">買い物リスト入り：残量がこの%以下かつ在庫0で</label>
+            <input type="number" id="itemMinAmountPercent" min="0" max="100" step="5" value="10">
+          </div>
+          <div class="form-row">
+            <label for="itemMinQty">最小在庫数（これ以下で買い物リストへ）</label>
+            <input type="number" id="itemMinQty" min="0" step="0.5" value="1">
+          </div>
+          <div class="form-row">
+            <label for="itemNote">メモ</label>
+            <input type="text" id="itemNote" placeholder="例: 洗面台の下、開封済みなど">
+          </div>
+          <div class="form-row">
+            <label for="itemPhoto">収納場所の写真</label>
+            <div class="photo-field">
+              <input type="file" id="itemPhoto" accept="image/*">
+              <div id="itemPhotoPreview" class="photo-preview empty">
+                <span>写真なし</span>
+              </div>
+              <button type="button" id="removeItemPhotoBtn" class="btn-soft hidden" onclick="removeItemPhoto()">写真を外す</button>
+            </div>
+          </div>
         </div>
-      </div>
+      </details>
     </div>
     <div class="modal-actions">
       <button class="btn-primary" onclick="saveItem()">保存</button>
