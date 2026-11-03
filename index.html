@@ -169,44 +169,42 @@
 <div id="itemModal" class="modal-overlay">
   <div class="modal-sheet" role="dialog" aria-labelledby="modalTitle">
     <div class="modal-handle"></div>
+    <!-- 保存ボタンは上に置く（下までスクロールしなくていいように） -->
     <div class="modal-header">
       <h2 id="modalTitle">品目を追加</h2>
-      <button class="modal-close" onclick="closeModal('itemModal')" aria-label="閉じる">✕</button>
+      <div class="modal-header-actions">
+        <button id="itemSaveBtn" class="btn-header-save" onclick="saveItem()">追加</button>
+        <button class="modal-close" onclick="closeItemModal()" aria-label="閉じる">✕</button>
+      </div>
     </div>
+    <p id="itemSaveHint" class="modal-save-hint"></p>
     <div class="modal-body">
       <div class="form-row">
         <label for="itemName">品名 *</label>
         <input type="text" id="itemName" placeholder="例: 牛乳" autocomplete="off">
       </div>
 
-      <button type="button" id="itemFavToggle" class="fav-toggle" aria-pressed="false"
-        onclick="toggleDraftFavorite()">☆ お気に入りに登録</button>
-
       <div class="form-row">
-        <label>置き場所（複数の分類に登録できます）</label>
-        <div id="itemLocationChips" class="location-chips"></div>
-        <button type="button" class="btn-soft" onclick="toggleLocationPicker()">＋ 置き場所を追加</button>
-        <div id="itemLocationPicker" class="location-picker hidden">
-          <select id="itemLocCategory" aria-label="追加するカテゴリ"></select>
-          <select id="itemLocSubcategory" aria-label="追加する小分類"></select>
-          <button type="button" class="btn-primary" onclick="addItemLocation()">追加</button>
-        </div>
-        <p class="field-hint">先頭が「主」の置き場所です。別の場所のチップをタップすると主に変わります。</p>
+        <label>在庫</label>
+        <div id="itemStockSeg" class="stock-seg stock-seg-large" role="group" aria-label="在庫の状態"></div>
       </div>
 
       <div class="form-row-2">
         <div class="form-row">
-          <label for="itemQty">現在の在庫数</label>
-          <input type="number" id="itemQty" min="0" step="0.5" value="1">
+          <label for="itemLocCategory">置き場所</label>
+          <select id="itemLocCategory"></select>
         </div>
         <div class="form-row">
-          <label for="itemUnit">単位</label>
-          <select id="itemUnit" class="unit-select"></select>
+          <label for="itemLocSubcategory">小分類</label>
+          <select id="itemLocSubcategory"></select>
         </div>
       </div>
 
+      <button type="button" id="itemFavToggle" class="fav-toggle" aria-pressed="false"
+        onclick="toggleDraftFavorite()">☆ お気に入りに登録</button>
+
       <details id="itemAdvanced" class="form-advanced">
-        <summary>詳しく設定する（期限・最小在庫・メモ・写真）</summary>
+        <summary>期限・メモ</summary>
         <div class="form-advanced-body">
           <div class="form-row-2">
             <div class="form-row">
@@ -221,45 +219,15 @@
               <input type="date" id="itemExpiry">
             </div>
           </div>
-          <p class="field-hint">使い切って在庫が0になると、消費期限は自動で消えます。</p>
-          <div class="form-row">
-            <label for="itemStockMode">管理方法</label>
-            <select id="itemStockMode">
-              <option value="count">残数のみ</option>
-              <option value="amount">残量＋残数</option>
-            </select>
-          </div>
-          <div id="itemAmountRow" class="form-row hidden">
-            <label for="itemAmountPercent">現在の残量（%）</label>
-            <input type="number" id="itemAmountPercent" min="0" max="100" step="1" value="100">
-          </div>
-          <div id="itemMinAmountRow" class="form-row hidden">
-            <label for="itemMinAmountPercent">買い物リスト入り：残量がこの%以下かつ在庫0で</label>
-            <input type="number" id="itemMinAmountPercent" min="0" max="100" step="5" value="10">
-          </div>
-          <div class="form-row">
-            <label for="itemMinQty">最小在庫数（これ以下で買い物リストへ）</label>
-            <input type="number" id="itemMinQty" min="0" step="0.5" value="1">
-          </div>
+          <p class="field-hint">「なし」にすると、消費期限は自動で消えます。</p>
           <div class="form-row">
             <label for="itemNote">メモ</label>
             <input type="text" id="itemNote" placeholder="例: 洗面台の下、開封済みなど">
-          </div>
-          <div class="form-row">
-            <label for="itemPhoto">収納場所の写真</label>
-            <div class="photo-field">
-              <input type="file" id="itemPhoto" accept="image/*">
-              <div id="itemPhotoPreview" class="photo-preview empty">
-                <span>写真なし</span>
-              </div>
-              <button type="button" id="removeItemPhotoBtn" class="btn-soft hidden" onclick="removeItemPhoto()">写真を外す</button>
-            </div>
           </div>
         </div>
       </details>
     </div>
     <div class="modal-actions">
-      <button class="btn-primary" onclick="saveItem()">保存</button>
       <button id="deleteItemBtn" class="btn-danger hidden" onclick="deleteItem()">削除</button>
     </div>
   </div>
@@ -271,7 +239,10 @@
     <div class="modal-handle"></div>
     <div class="modal-header">
       <h2 id="menuModalTitle">メニューを追加</h2>
-      <button class="modal-close" onclick="closeModal('menuModal')" aria-label="閉じる">✕</button>
+      <div class="modal-header-actions">
+        <button class="btn-header-save" onclick="saveMenu()">保存</button>
+        <button class="modal-close" onclick="closeModal('menuModal')" aria-label="閉じる">✕</button>
+      </div>
     </div>
     <div class="modal-body">
       <div class="form-row">
@@ -290,7 +261,6 @@
       </div>
     </div>
     <div class="modal-actions">
-      <button class="btn-primary" onclick="saveMenu()">保存</button>
       <button id="deleteMenuBtn" class="btn-danger hidden" onclick="deleteMenu()">削除</button>
     </div>
   </div>
@@ -308,16 +278,6 @@
       <div class="form-row">
         <label for="shopItemName">品名 *</label>
         <input type="text" id="shopItemName" placeholder="例: トイレットペーパー" autocomplete="off">
-      </div>
-      <div class="form-row-2">
-        <div class="form-row">
-          <label for="shopItemQty">数量</label>
-          <input type="number" id="shopItemQty" min="1" step="1" value="1">
-        </div>
-        <div class="form-row">
-          <label for="shopItemUnit">単位</label>
-          <select id="shopItemUnit" class="unit-select"></select>
-        </div>
       </div>
     </div>
     <div class="modal-actions">

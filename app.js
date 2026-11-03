@@ -51,6 +51,13 @@ const SUBCATEGORIES = {
 // お気に入りは通常カテゴリではなく、チップ上だけの絞り込み
 const FAVORITE_FILTER = { id: 'fav', label: 'お気に入り', icon: '⭐' };
 
+// 在庫は個数ではなく3段階だけで持つ。少ない・なしで買い物リスト入り
+const STOCK_LEVELS = [
+  { id: 'ok',  label: 'ある' },
+  { id: 'low', label: '少ない' },
+  { id: 'out', label: 'なし' },
+];
+
 const SORT_OPTIONS = [
   { id: 'priority', label: '期限・在庫優先' },
   { id: 'name',     label: '名前順' },
@@ -58,8 +65,6 @@ const SORT_OPTIONS = [
   { id: 'category', label: '分類順' },
   { id: 'date',     label: '日付順' },
 ];
-
-const UNITS = ['個', '本', '袋', '缶', '箱', '枚', 'セット', 'パック', 'g', 'kg', 'ml', 'L', '冊', '錠', '包'];
 
 const CHAR = {
   arteGentle: 'assets/chibi_inventory_icons/Arte/Arte_01_gentle_standing.png',
@@ -173,16 +178,13 @@ let idleTimer       = null;
 let peekTimer       = null;
 let lastPeekAt      = 0;
 let wasAway         = false;
-let itemPhotoDraft  = null;
-let itemPhotoLoading = false;
-let itemPhotoToken  = 0;
+let itemStockDraft  = 'ok';
 let editingMenuId   = null;
 let menuIngredientDraft = [];
 let expandedMenuIds = new Set();
 let choosingIngredientRowId = null;
 let ingredientPickerQuery = '';
 let pendingMenuIngredientLink = null;
-let itemLocationDraft = [];      // [{ category, subcategory }] 先頭がメインの置き場所
 let itemFavoriteDraft = false;
 
 // ─────────────────────────────────────────────
@@ -220,7 +222,7 @@ function persistLocal() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn('persistLocal:', e);
-    showToast('保存に失敗しました。写真を減らすか容量を確認してください', true);
+    showToast('保存に失敗しました。端末の空き容量を確認してください', true);
   }
 }
 
@@ -463,15 +465,28 @@ function normalizeItem(item) {
   item.favorite = item.favorite === true;
   if (!item.dateType) item.dateType = 'expiry';
   if (item.dateType !== 'start') item.dateType = 'expiry';
-  if (!item.stockMode) item.stockMode = 'count';
-  if (item.stockMode !== 'amount') item.stockMode = 'count';
-  if (item.stockMode === 'amount') {
-    item.amountPercent = Number.isFinite(Number(item.amountPercent))
-      ? Math.min(100, Math.max(0, Number(item.amountPercent)))
-      : 100;
+  if (!STOCK_LEVELS.some(l => l.id === item.stock)) item.stock = legacyStockLevel(item);
+  // 個数・残量・写真の時代の項目は使わないので片付ける（写真は容量も食う）
+  for (const key of ['quantity', 'unit', 'minQuantity', 'stockMode', 'amountPercent', 'minAmountPercent', 'locationPhoto']) {
+    delete item[key];
   }
-  if (!item.locationPhoto) item.locationPhoto = null;
   return item;
+}
+
+// 個数で管理していた頃のデータを3段階に読み替える
+function legacyStockLevel(item) {
+  const qty = Number(item.quantity) || 0;
+  const amountMode = item.stockMode === 'amount';
+  const percent = Number(item.amountPercent ?? 100);
+  if (qty <= 0 && (!amountMode || percent <= 0)) return item.quantity === undefined ? 'ok' : 'out';
+  const threshold = Number.isFinite(Number(item.minAmountPercent)) ? Number(item.minAmountPercent) : 10;
+  const countLow = item.minQuantity > 0 && qty <= item.minQuantity;
+  const amountLow = amountMode && qty <= 0 && percent <= threshold;
+  return countLow || amountLow ? 'low' : 'ok';
+}
+
+function stockLevelInfo(id) {
+  return STOCK_LEVELS.find(l => l.id === id) || STOCK_LEVELS[0];
 }
 
 function normalizeMenu(menu) {
@@ -480,8 +495,6 @@ function normalizeMenu(menu) {
   menu.ingredients = menu.ingredients.map(ingredient => ({
     itemId: ingredient.itemId || '',
     name: ingredient.name || '',
-    unit: ingredient.unit || '個',
-    quantity: Math.max(0.5, Number(ingredient.quantity) || 1),
   }));
   if (!menu.note) menu.note = '';
   return menu;
@@ -509,31 +522,20 @@ function itemDateLabel(item) {
   return expiryLabel(date);
 }
 
-function itemStockLabel(item) {
-  if (item.stockMode === 'amount') {
-    const amount = Number.isFinite(Number(item.amountPercent)) ? Math.round(Number(item.amountPercent)) : 0;
-    return `<span class="amount-left">残${amount}%</span><span class="amount-plus">+</span>${esc(item.quantity)}<span class="qty-unit">${esc(item.unit)}</span>`;
-  }
-  return `${esc(item.quantity)}<span class="qty-unit">${esc(item.unit)}</span>`;
+function stockSegmentHtml(item) {
+  return `<div class="stock-seg" role="group" aria-label="在庫の状態">${STOCK_LEVELS.map(l => `
+    <button type="button" class="stock-seg-btn level-${l.id} ${item.stock === l.id ? 'on' : ''}"
+      data-action="stock" data-value="${l.id}" aria-pressed="${item.stock === l.id}">${l.label}</button>`).join('')}
+  </div>`;
 }
 
 function isItemLow(item) {
-  const countLow = item.minQuantity > 0 && item.quantity <= item.minQuantity;
-  // 残量モード: 在庫0 かつ 残量% が閾値以下でリスト入り
-  const threshold = Number.isFinite(Number(item.minAmountPercent)) ? Number(item.minAmountPercent) : 10;
-  const amountLow = item.stockMode === 'amount'
-    && item.quantity <= 0
-    && Number(item.amountPercent ?? 100) <= threshold;
-  return countLow || amountLow;
+  return item.stock === 'low' || item.stock === 'out';
 }
 
 /* ── 使い切り判定と期限の自動リセット ── */
 function isItemEmpty(item) {
-  const qty = Number(item.quantity) || 0;
-  if (item.stockMode === 'amount') {
-    return qty <= 0 && (Number(item.amountPercent) || 0) <= 0;
-  }
-  return qty <= 0;
+  return item.stock === 'out';
 }
 
 // 使い切って0になったら消費期限を自動で消す（使用開始日は残す）
@@ -631,8 +633,6 @@ function syncAutoShoppingItems() {
       state.shoppingList.push({
         id: uid(), itemId: item.id,
         name: item.name,
-        quantity: Math.max(1, item.minQuantity - item.quantity + 1),
-        unit: item.unit,
         checked: false,
         addedAt: new Date().toISOString(),
         auto: true,
@@ -640,7 +640,14 @@ function syncAutoShoppingItems() {
       changed = true;
     }
   }
-  if (changed) persistLocal();
+  // 一覧で「ある」に戻したものは、未購入の自動追加分をリストから外す
+  const before = state.shoppingList.length;
+  state.shoppingList = state.shoppingList.filter(s => {
+    if (!s.auto || s.checked || !s.itemId) return true;
+    const item = state.items.find(i => i.id === s.itemId);
+    return item && isItemLow(item);
+  });
+  if (changed || state.shoppingList.length !== before) persistLocal();
 }
 
 // ─────────────────────────────────────────────
@@ -660,9 +667,8 @@ function compareItems(a, b) {
   const dateB = daysUntil(b.dateType === 'start' ? null : itemDate(b)) ?? 9999;
   if (currentSort === 'name') return a.name.localeCompare(b.name, 'ja');
   if (currentSort === 'quantity') {
-    const amountA = a.stockMode === 'amount' ? Number(a.amountPercent ?? 100) : 100;
-    const amountB = b.stockMode === 'amount' ? Number(b.amountPercent ?? 100) : 100;
-    return (amountA - amountB) || (a.quantity - b.quantity) || a.name.localeCompare(b.name, 'ja');
+    const rank = { out: 0, low: 1, ok: 2 };
+    return (rank[a.stock] - rank[b.stock]) || a.name.localeCompare(b.name, 'ja');
   }
   if (currentSort === 'category') {
     return catInfo(a.category).label.localeCompare(catInfo(b.category).label, 'ja')
@@ -731,7 +737,7 @@ function stockCardHtml(item) {
   const locHtml = `<span class="item-loc">${mainSub.icon} ${esc(mainSub.label)}</span>`
     + (locs.length > 1 ? `<span class="item-loc-more" title="${esc(locs.map(locationLabel).join(' / '))}">＋${locs.length - 1}</span>` : '');
   return `
-      <div class="item-card cat-${cat.id} ${expCl} ${isLow ? 'low-stock' : ''} ${item.favorite ? 'is-favorite' : ''}"
+      <div class="item-card cat-${cat.id} ${expCl} ${isLow ? 'low-stock' : ''} stock-${item.stock} ${item.favorite ? 'is-favorite' : ''}"
         data-id="${item.id}" role="button" tabindex="0" aria-label="${esc(item.name)}を編集">
         <div class="item-cat-icon">${cat.icon}</div>
         <div class="item-body">
@@ -739,15 +745,10 @@ function stockCardHtml(item) {
           <div class="item-subcat">${locHtml}</div>
           ${expLb ? `<div class="item-expiry ${expCl}">${expLb}</div>` : ''}
           ${item.note ? `<div class="item-note">${esc(item.note)}</div>` : ''}
-          ${item.locationPhoto ? `<img class="item-location-photo" src="${item.locationPhoto}" alt="収納場所の写真">` : ''}
-          ${isLow ? `<div class="item-low">⚠️ 在庫少（最小${item.minQuantity}${esc(item.unit)}）</div>` : ''}
+          ${isLow ? '<div class="item-low">🛒 買い物リストに入っています</div>' : ''}
         </div>
         ${alertIcon ? `<img class="item-alert-character" src="${alertIcon}" alt="">` : ''}
-        <div class="item-qty-ctrl">
-          <button class="qty-btn" data-action="dec" aria-label="減らす">−</button>
-          <span class="qty-value ${item.stockMode === 'amount' ? 'amount-mode' : ''}">${itemStockLabel(item)}</span>
-          <button class="qty-btn" data-action="inc" aria-label="増やす">＋</button>
-        </div>
+        ${stockSegmentHtml(item)}
         <button class="item-fav-btn ${item.favorite ? 'on' : ''}" data-action="fav"
           aria-pressed="${item.favorite ? 'true' : 'false'}"
           aria-label="${item.favorite ? 'お気に入りから外す' : 'お気に入りに登録'}">${item.favorite ? '⭐' : '☆'}</button>
@@ -828,33 +829,21 @@ function toggleFavorite(itemId) {
 }
 
 /* ── 料理メニュー ── */
+// 食材は「なし」か在庫未登録なら不足扱い。「少ない」はまだ作れる
 function menuIngredientStatus(ingredient) {
   const item = state.items.find(i => i.id === ingredient.itemId);
-  const needed = Math.max(0.5, Number(ingredient.quantity) || 1);
   if (!item) {
     return {
       item: null,
       name: ingredient.name || '未設定の食材',
-      unit: ingredient.unit || '個',
-      needed,
-      missing: needed,
+      missing: true,
       availableText: '在庫との紐付けなし',
     };
   }
-  const unit = item.unit || ingredient.unit || '個';
-  if (item.stockMode === 'amount') {
-    const amount = Number(item.amountPercent) || 0;
-    const available = Number(item.quantity || 0) + (amount > 0 ? 1 : 0);
-    return {
-      item, name: item.name, unit, needed,
-      missing: Math.max(0, needed - available),
-      availableText: `残${Math.round(amount)}% + ${item.quantity}${unit}`,
-    };
-  }
   return {
-    item, name: item.name, unit, needed,
-    missing: Math.max(0, needed - item.quantity),
-    availableText: `${item.quantity}${unit}`,
+    item, name: item.name,
+    missing: item.stock === 'out',
+    availableText: stockLevelInfo(item.stock).label,
   };
 }
 
@@ -873,15 +862,14 @@ function renderMenus() {
   }
   list.innerHTML = state.menus.map(menu => {
     const statuses = menu.ingredients.map(menuIngredientStatus);
-    const missing = statuses.filter(status => status.missing > 0);
+    const missing = statuses.filter(status => status.missing);
     const statusClass = missing.length ? 'shortage' : 'ready';
     const statusLabel = missing.length ? `不足 ${missing.length}品` : '作れる';
     const expanded = expandedMenuIds.has(menu.id);
     const ingredients = statuses.map((status, index) => `
-      <div class="menu-stock-row ${status.missing > 0 ? 'missing' : 'available'}">
-        <span class="menu-stock-mark">${status.missing > 0 ? '！' : '✓'}</span>
+      <div class="menu-stock-row ${status.missing ? 'missing' : 'available'}">
+        <span class="menu-stock-mark">${status.missing ? '！' : '✓'}</span>
         <span class="menu-stock-name">${esc(status.name)}</span>
-        <span class="menu-stock-needed">必要${status.needed}${esc(status.unit)}</span>
         <span class="menu-stock-current">${esc(status.availableText)}</span>
         ${!status.item ? `<button class="menu-register-btn" onclick="registerMenuIngredient('${menu.id}',${index})">在庫に登録</button>` : ''}
       </div>`).join('');
@@ -941,7 +929,7 @@ function renderShopping() {
       <button class="shop-check" onclick="toggleShopItem('${s.id}')">${s.checked ? '✅' : '⬜'}</button>
       <div class="shop-body">
         <span class="shop-name">${esc(s.name)}</span>
-        <span class="shop-qty">${s.quantity}${esc(s.unit)}</span>
+        ${Number(s.quantity) > 1 && s.unit ? `<span class="shop-qty">${s.quantity}${esc(s.unit)}</span>` : ''}
         ${s.auto ? '<span class="shop-auto">自動</span>' : ''}
         ${s.fromMenu ? '<span class="shop-menu">メニュー</span>' : ''}
       </div>
@@ -1039,123 +1027,25 @@ function updateDateTypeLabel() {
   if (input) input.type = isStart ? 'datetime-local' : 'date';
 }
 
-function updateStockModeFields() {
-  const mode = $('itemStockMode')?.value || 'count';
-  $('itemAmountRow')?.classList.toggle('hidden', mode !== 'amount');
-  $('itemMinAmountRow')?.classList.toggle('hidden', mode !== 'amount');
-  // 残量モードに切り替えたとき、最小在庫数の初期値を0にする
-  if (mode === 'amount') {
-    const minQtyEl = $('itemMinQty');
-    if (minQtyEl && (minQtyEl.value === '' || Number(minQtyEl.value) === 1)) {
-      minQtyEl.value = '0';
-    }
-  }
-}
-
-function renderItemPhotoPreview() {
-  const preview = $('itemPhotoPreview');
-  const removeBtn = $('removeItemPhotoBtn');
-  if (!preview) return;
-  if (itemPhotoDraft) {
-    preview.classList.remove('empty');
-    preview.innerHTML = `<img src="${itemPhotoDraft}" alt="収納場所の写真プレビュー">`;
-    removeBtn?.classList.remove('hidden');
-  } else {
-    preview.classList.add('empty');
-    preview.innerHTML = '<span>写真なし</span>';
-    removeBtn?.classList.add('hidden');
-  }
-}
-
-function removeItemPhoto() {
-  itemPhotoToken += 1;
-  itemPhotoLoading = false;
-  itemPhotoDraft = null;
-  const input = $('itemPhoto');
-  if (input) input.value = '';
-  renderItemPhotoPreview();
-}
-
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
-
-function loadImage(src) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
-}
-
-async function resizePhoto(file) {
-  const src = await readFileAsDataUrl(file);
-  const img = await loadImage(src);
-  const maxSize = 960;
-  const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
-  const width = Math.max(1, Math.round(img.width * scale));
-  const height = Math.max(1, Math.round(img.height * scale));
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-  return canvas.toDataURL('image/jpeg', 0.78);
-}
-
-async function handleItemPhotoChange(event) {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  if (!file.type.startsWith('image/')) {
-    showToast('画像ファイルを選んでください', true);
-    event.target.value = '';
-    return;
-  }
-  itemPhotoLoading = true;
-  const token = itemPhotoToken + 1;
-  itemPhotoToken = token;
-  try {
-    const resized = await resizePhoto(file);
-    if (token !== itemPhotoToken) return;
-    itemPhotoDraft = resized;
-    renderItemPhotoPreview();
-    showToast('写真を添付しました 📷');
-  } catch (err) {
-    if (token !== itemPhotoToken) return;
-    console.warn(err);
-    showToast('写真の読み込みに失敗しました', true);
-    event.target.value = '';
-  } finally {
-    if (token === itemPhotoToken) itemPhotoLoading = false;
-  }
-}
-
 // ─────────────────────────────────────────────
 //  品目 CRUD
 // ─────────────────────────────────────────────
-function changeQty(itemId, delta) {
+// 一覧の「ある・少ない・なし」はタップした瞬間に保存する
+function setStock(itemId, level) {
   const item = state.items.find(i => i.id === itemId);
-  if (!item) return;
-  if (item.stockMode === 'amount') {
-    changeAmountStock(item, delta);
-  } else {
-    item.quantity = Math.max(0, item.quantity + delta);
-  }
+  if (!item || item.stock === level) return;
+  item.stock = level;
   item.updatedAt = new Date().toISOString();
-  // 使い切って0になったら消費期限を自動リセット
+  // 使い切ったら消費期限を自動リセット
   const cleared = clearExpiryWhenEmpty(item);
   saveState();
   // 並び替えでカードが飛ばないよう、該当カードだけ更新する
   updateStockCard(item);
+  document.querySelector(`.item-card[data-id="${item.id}"]`)?.classList.add('just-saved');
   renderCharacterTip();
-  if (cleared) showToast(`${item.name} を使い切ったので消費期限を消しました 🗓️`);
-  // 在庫が最小数以下になったらバッジ更新
   updateShoppingBadge();
+  if (cleared) showToast(`${item.name} を使い切ったので消費期限を消しました 🗓️`);
+  else showToast(`${item.name}：${stockLevelInfo(level).label} ✅`);
 }
 
 function updateStockCard(item) {
@@ -1164,71 +1054,13 @@ function updateStockCard(item) {
   card.outerHTML = stockCardHtml(item);
 }
 
-function changeAmountStock(item, delta) {
-  const step = delta > 0 ? 10 : -10;
-  let amount = Number.isFinite(Number(item.amountPercent)) ? Number(item.amountPercent) : 0;
-  amount = Math.min(100, Math.max(0, Math.round(amount / 10) * 10));
-  item.quantity = Math.max(0, Number(item.quantity) || 0);
-
-  if (step < 0) {
-    if (amount > 0) {
-      item.amountPercent = Math.max(0, amount + step);
-    } else if (item.quantity > 0) {
-      item.quantity -= 1;
-      item.amountPercent = 90;
-    } else {
-      item.amountPercent = 0;
-    }
-    return;
-  }
-
-  if (amount < 90) {
-    item.amountPercent = amount + step;
-  } else {
-    item.quantity += 1;
-    item.amountPercent = 0;
-  }
-}
-
-/* ── 置き場所（複数）の編集 ── */
-function setItemLocationDraft(locations) {
-  itemLocationDraft = dedupeLocations(locations);
-  if (!itemLocationDraft.length) itemLocationDraft = [normalizeLocation({ category: 'refrigerator' })];
-  renderItemLocationChips();
-}
-
-function renderItemLocationChips() {
-  const wrap = $('itemLocationChips');
-  if (!wrap) return;
-  wrap.innerHTML = itemLocationDraft.map((loc, index) => `
-    <span class="location-chip ${index === 0 ? 'main' : ''}">
-      <button type="button" class="location-chip-label" onclick="makeMainLocation(${index})"
-        title="${index === 0 ? 'メインの置き場所' : 'タップでメインにする'}">${index === 0 ? '主 ' : ''}${locationLabel(loc)}</button>
-      ${itemLocationDraft.length > 1
-        ? `<button type="button" class="location-chip-remove" onclick="removeItemLocation(${index})" aria-label="この置き場所を外す">✕</button>`
-        : ''}
-    </span>`).join('');
-}
-
-function makeMainLocation(index) {
-  if (index <= 0 || index >= itemLocationDraft.length) return;
-  const [loc] = itemLocationDraft.splice(index, 1);
-  itemLocationDraft.unshift(loc);
-  renderItemLocationChips();
-}
-
-function removeItemLocation(index) {
-  if (itemLocationDraft.length <= 1) return;
-  itemLocationDraft.splice(index, 1);
-  renderItemLocationChips();
-}
-
-function toggleLocationPicker(forceOpen = null) {
-  const panel = $('itemLocationPicker');
-  if (!panel) return;
-  const open = forceOpen === null ? panel.classList.contains('hidden') : forceOpen;
-  panel.classList.toggle('hidden', !open);
-  if (open) updateLocationPickerSubcats();
+/* ── 置き場所（モーダル内） ── */
+function fillLocationSelects(loc) {
+  const catSel = $('itemLocCategory');
+  if (!catSel) return;
+  catSel.value = loc.category;
+  updateLocationPickerSubcats();
+  $('itemLocSubcategory').value = loc.subcategory;
 }
 
 function updateLocationPickerSubcats() {
@@ -1239,19 +1071,18 @@ function updateLocationPickerSubcats() {
     .map(s => `<option value="${s.id}">${s.icon} ${s.label}</option>`).join('');
 }
 
-function addItemLocation() {
-  const loc = normalizeLocation({
-    category:    $('itemLocCategory')?.value,
-    subcategory: $('itemLocSubcategory')?.value,
+/* ── 在庫の状態（モーダル内） ── */
+function setStockDraft(level) {
+  itemStockDraft = level;
+  renderStockDraft();
+}
+
+function renderStockDraft() {
+  document.querySelectorAll('#itemStockSeg .stock-seg-btn').forEach(btn => {
+    const on = btn.dataset.value === itemStockDraft;
+    btn.classList.toggle('on', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
-  if (!loc) return;
-  if (itemLocationDraft.some(l => locationKey(l) === locationKey(loc))) {
-    showToast('その置き場所はすでに追加されています', true);
-    return;
-  }
-  itemLocationDraft.push(loc);
-  renderItemLocationChips();
-  toggleLocationPicker(false);
 }
 
 /* ── お気に入り（モーダル内） ── */
@@ -1274,41 +1105,29 @@ function openAddItem(menuLink = null) {
   $('modalTitle').textContent = '品目を追加';
   $('itemName').value     = '';
   const baseCategory = currentCategory !== 'all' && currentCategory !== 'fav' ? currentCategory : 'refrigerator';
-  setItemLocationDraft([{
+  fillLocationSelects({
     category: baseCategory,
     subcategory: currentSubcategory !== 'all' ? currentSubcategory : defaultSubcategory(baseCategory),
-  }]);
-  toggleLocationPicker(false);
+  });
   itemFavoriteDraft = false;
   renderDraftFavorite();
+  setStockDraft('ok');
   const advanced = $('itemAdvanced');
   if (advanced) advanced.open = false;
-  $('itemStockMode').value = 'count';
-  $('itemAmountPercent').value = '100';
-  $('itemMinAmountPercent').value = '10';
-  updateStockModeFields();
-  $('itemQty').value      = '1';
-  $('itemUnit').value     = '個';
-  $('itemMinQty').value   = '1';
   $('itemDateType').value = 'expiry';
   updateDateTypeLabel();
   $('itemExpiry').value   = '';
   $('itemNote').value     = '';
-  itemPhotoToken += 1;
-  itemPhotoDraft = null;
-  itemPhotoLoading = false;
-  if ($('itemPhoto')) $('itemPhoto').value = '';
-  renderItemPhotoPreview();
   $('deleteItemBtn').classList.add('hidden');
+  $('itemSaveHint').textContent = '入力したら右上の「追加」か Enter で登録';
+  $('itemSaveBtn').textContent = '追加';
   if (menuLink) {
     const menu = state.menus.find(entry => entry.id === menuLink.menuId);
     const ingredient = menu?.ingredients[menuLink.ingredientIndex];
     if (ingredient) {
       $('modalTitle').textContent = '食材を在庫に登録';
       $('itemName').value = ingredient.name;
-      $('itemUnit').value = ingredient.unit || '個';
-      $('itemQty').value = '0';
-      $('itemMinQty').value = '0';
+      setStockDraft('out');
     }
   }
   openModal('itemModal');
@@ -1322,90 +1141,63 @@ function openEditItem(itemId) {
   editingItemId = itemId;
   $('modalTitle').textContent = '品目を編集';
   $('itemName').value     = item.name;
-  setItemLocationDraft(itemLocations(item));
-  toggleLocationPicker(false);
+  fillLocationSelects(itemLocations(item)[0]);
   itemFavoriteDraft = item.favorite === true;
   renderDraftFavorite();
+  setStockDraft(item.stock);
   const advanced = $('itemAdvanced');
-  if (advanced) {
-    // 何か設定済みなら詳細を開いた状態で見せる
-    advanced.open = Boolean(itemDate(item) || item.note || item.locationPhoto
-      || item.stockMode === 'amount' || Number(item.minQuantity) !== 1);
-  }
-  $('itemStockMode').value = item.stockMode || 'count';
-  $('itemAmountPercent').value = Number.isFinite(Number(item.amountPercent)) ? item.amountPercent : 100;
-  $('itemMinAmountPercent').value = Number.isFinite(Number(item.minAmountPercent)) ? item.minAmountPercent : 10;
-  updateStockModeFields();
-  $('itemQty').value      = item.quantity;
-  $('itemUnit').value     = item.unit;
-  $('itemMinQty').value   = item.minQuantity;
+  // 何か設定済みなら詳細を開いた状態で見せる
+  if (advanced) advanced.open = Boolean(itemDate(item) || item.note);
   $('itemDateType').value = item.dateType || 'expiry';
   updateDateTypeLabel();
   const dateValue = itemDate(item) || '';
   $('itemExpiry').value   = item.dateType === 'start' && dateValue.length === 10 ? `${dateValue}T00:00` : dateValue;
   $('itemNote').value     = item.note || '';
-  itemPhotoToken += 1;
-  itemPhotoDraft          = item.locationPhoto || null;
-  itemPhotoLoading        = false;
-  if ($('itemPhoto')) $('itemPhoto').value = '';
-  renderItemPhotoPreview();
   $('deleteItemBtn').classList.remove('hidden');
+  $('itemSaveHint').textContent = '閉じると自動で保存されます';
+  $('itemSaveBtn').textContent = '保存';
   openModal('itemModal');
+}
+
+// 編集中は ✕・背景タップ・Esc で閉じても保存する（保存し忘れ防止）
+function closeItemModal() {
+  if (editingItemId && $('itemName').value.trim()) saveItem();
+  else closeModal('itemModal');
 }
 
 function saveItem() {
   const name = $('itemName').value.trim();
   if (!name) { showToast('品名を入力してください', true); return; }
-  if (itemPhotoLoading) { showToast('写真を読み込み中です。少し待ってください', true); return; }
 
-  const qty    = parseFloat($('itemQty').value)    || 0;
-  const minQty = parseFloat($('itemMinQty').value) || 0;
-  const now    = new Date().toISOString();
-  const locations = dedupeLocations(itemLocationDraft);
-  if (!locations.length) { showToast('置き場所を1つ以上えらんでください', true); return; }
+  const now = new Date().toISOString();
+  const location = normalizeLocation({
+    category:    $('itemLocCategory').value,
+    subcategory: $('itemLocSubcategory').value,
+  });
+  const fields = {
+    name,
+    locations:   [location],
+    category:    location.category,
+    subcategory: location.subcategory,
+    favorite:    itemFavoriteDraft,
+    stock:       itemStockDraft,
+    dateType:    $('itemDateType').value,
+    expiryDate:  $('itemExpiry').value || null,
+    note:        $('itemNote').value.trim(),
+  };
   let savedItem = null;
+  let changed = true;
 
   if (editingItemId) {
     const item = state.items.find(i => i.id === editingItemId);
     if (item) {
-      savedItem        = item;
-      item.name        = name;
-      item.locations   = locations;
-      item.category    = locations[0].category;
-      item.subcategory = locations[0].subcategory;
-      item.favorite    = itemFavoriteDraft;
-      item.stockMode        = $('itemStockMode').value;
-      item.amountPercent    = item.stockMode === 'amount' ? Math.min(100, Math.max(0, parseFloat($('itemAmountPercent').value) || 0)) : null;
-      item.minAmountPercent = item.stockMode === 'amount' ? Math.min(100, Math.max(0, parseFloat($('itemMinAmountPercent').value) || 10)) : null;
-      item.quantity    = qty;
-      item.unit        = $('itemUnit').value;
-      item.minQuantity = minQty;
-      item.dateType    = $('itemDateType').value;
-      item.expiryDate  = $('itemExpiry').value || null;
-      item.note        = $('itemNote').value.trim();
-      item.locationPhoto = itemPhotoDraft;
-      item.updatedAt   = now;
+      savedItem = item;
+      changed = JSON.stringify(Object.keys(fields).map(k => item[k] ?? null))
+        !== JSON.stringify(Object.keys(fields).map(k => fields[k] ?? null));
+      if (changed) Object.assign(item, fields, { updatedAt: now });
     }
   } else {
-    const addedItem = {
-      id: uid(), name,
-      locations,
-      category:    locations[0].category,
-      subcategory: locations[0].subcategory,
-      favorite:    itemFavoriteDraft,
-      stockMode:        $('itemStockMode').value,
-      amountPercent:    $('itemStockMode').value === 'amount' ? Math.min(100, Math.max(0, parseFloat($('itemAmountPercent').value) || 0)) : null,
-      minAmountPercent: $('itemStockMode').value === 'amount' ? Math.min(100, Math.max(0, parseFloat($('itemMinAmountPercent').value) || 10)) : null,
-      quantity:    qty,
-      unit:        $('itemUnit').value,
-      minQuantity: minQty,
-      dateType:    $('itemDateType').value,
-      expiryDate:  $('itemExpiry').value || null,
-      note:        $('itemNote').value.trim(),
-      locationPhoto: itemPhotoDraft,
-      createdAt:   now,
-      updatedAt:   now,
-    };
+    const addedItem = { id: uid(), ...fields, createdAt: now, updatedAt: now };
     state.items.push(addedItem);
     savedItem = addedItem;
     if (pendingMenuIngredientLink) {
@@ -1414,16 +1206,17 @@ function saveItem() {
       if (ingredient) {
         ingredient.itemId = addedItem.id;
         ingredient.name = addedItem.name;
-        ingredient.unit = addedItem.unit;
         menu.updatedAt = now;
         expandedMenuIds.add(menu.id);
       }
     }
   }
+  if (savedItem) clearExpiryWhenEmpty(savedItem);
 
   const wasEditing = Boolean(editingItemId);
   pendingMenuIngredientLink = null;
   closeModal('itemModal');
+  if (!changed) return;
   saveState();
   // 保存した品目が今の絞り込みで隠れてしまうときは、見える場所へ戻す
   if (savedItem && currentTab === 'stock' && !itemMatchesFilter(savedItem)) {
@@ -1434,7 +1227,7 @@ function saveItem() {
   }
   renderAll();
   updateShoppingBadge();
-  showToast(wasEditing ? '更新しました ✅' : '追加しました ✅');
+  showToast(wasEditing ? '保存しました ✅' : '追加しました ✅');
 }
 
 function deleteItem() {
@@ -1470,21 +1263,12 @@ function renderMenuIngredientRows() {
   }
   rows.innerHTML = menuIngredientDraft.map(row => {
     const item = state.items.find(i => i.id === row.itemId);
-    const unit = item?.unit || row.unit || '個';
     const label = item?.name || row.name || '食材を選択';
     const emptyClass = item ? '' : row.name ? ' unregistered' : ' empty';
     return `
       <div class="menu-ingredient-row">
         <button type="button" class="ingredient-select${emptyClass}"
           onclick="openIngredientPicker('${row.id}')">${esc(label)}<span>⌄</span></button>
-        <div class="ingredient-quantity">
-          <input type="number" min="0.5" step="0.5" value="${row.quantity}"
-            aria-label="必要数" onchange="updateMenuIngredient('${row.id}','quantity',this.value)">
-          ${item ? `<span>${esc(unit)}</span>` : `
-            <select aria-label="単位" onchange="updateMenuIngredient('${row.id}','unit',this.value)">
-              ${UNITS.map(option => `<option value="${option}"${option === unit ? ' selected' : ''}>${option}</option>`).join('')}
-            </select>`}
-        </div>
         <button type="button" class="ingredient-remove" onclick="removeMenuIngredientRow('${row.id}')" aria-label="食材を外す">✕</button>
       </div>`;
   }).join('');
@@ -1496,8 +1280,6 @@ function addMenuIngredientRow(ingredient = null) {
     id: uid(),
     itemId: ingredient?.itemId || '',
     name: ingredient?.name || '',
-    unit: ingredient?.unit || '個',
-    quantity: Math.max(0.5, Number(ingredient?.quantity) || 1),
   };
   menuIngredientDraft.push(row);
   if (!ingredient) {
@@ -1520,7 +1302,7 @@ function ingredientResultsHtml() {
     ? candidates.map(item => `
       <button type="button" class="ingredient-result" onclick="chooseMenuIngredient('${item.id}')">
         <strong>${esc(item.name)}</strong>
-        <span>${esc(catInfo(item.category).label)} / ${esc(subcatInfo(item.category, item.subcategory).label)}　${itemStockLabel(item)}</span>
+        <span>${esc(catInfo(item.category).label)} / ${esc(subcatInfo(item.category, item.subcategory).label)}　${stockLevelInfo(item.stock).label}</span>
       </button>`).join('')
     : '<p class="ingredient-no-result">一致する在庫品がありません</p>';
   const name = ingredientPickerQuery.trim();
@@ -1568,7 +1350,6 @@ function chooseUnregisteredIngredient() {
   if (!row || !name) return;
   row.itemId = '';
   row.name = name;
-  if (!row.unit) row.unit = '個';
   closeIngredientPicker();
   renderMenuIngredientRows();
 }
@@ -1582,20 +1363,9 @@ function closeIngredientPicker() {
 function updateMenuIngredient(rowId, field, value) {
   const row = menuIngredientDraft.find(ingredient => ingredient.id === rowId);
   if (!row) return;
-  if (field === 'quantity') {
-    row.quantity = Math.max(0.5, Number(value) || 1);
-    return;
-  }
-  if (field === 'unit') {
-    row.unit = value || '個';
-    return;
-  }
   row.itemId = value;
   const item = state.items.find(i => i.id === value);
-  if (item) {
-    row.name = item.name;
-    row.unit = item.unit;
-  }
+  if (item) row.name = item.name;
   renderMenuIngredientRows();
 }
 
@@ -1642,8 +1412,6 @@ function saveMenu() {
     return {
       itemId: item?.id || '',
       name: item?.name || ingredient.name,
-      unit: item?.unit || ingredient.unit,
-      quantity: Math.max(0.5, Number(ingredient.quantity) || 1),
     };
   });
   if (!ingredients.length) { showToast('必要な食材を追加してください', true); return; }
@@ -1700,22 +1468,16 @@ function addMissingMenuItemsToShopping(menuId) {
   let added = 0;
   let unresolved = 0;
   menu.ingredients.map(menuIngredientStatus).forEach(status => {
-    if (status.missing <= 0) return;
+    if (!status.missing) return;
     if (!status.item) {
       unresolved += 1;
       return;
     }
-    const pending = state.shoppingList
-      .filter(shop => shop.itemId === status.item.id && !shop.checked)
-      .reduce((total, shop) => total + Number(shop.quantity || 0), 0);
-    const quantity = Math.max(0, status.missing - pending);
-    if (quantity <= 0) return;
+    if (state.shoppingList.some(shop => shop.itemId === status.item.id && !shop.checked)) return;
     state.shoppingList.push({
       id: uid(),
       itemId: status.item.id,
       name: status.item.name,
-      quantity,
-      unit: status.unit,
       checked: false,
       addedAt: new Date().toISOString(),
       auto: false,
@@ -1738,22 +1500,26 @@ function toggleShopItem(shopId) {
   if (!shop) return;
   shop.checked = !shop.checked;
 
-  let clearedItem = null;
+  let restockedItem = null;
   if (shop.itemId) {
     const item = state.items.find(i => i.id === shop.itemId);
     if (item) {
-      // チェック→在庫補充 / アンチェック→在庫を戻す
-      item.quantity  += shop.checked ? shop.quantity : -shop.quantity;
-      item.quantity   = Math.max(0, item.quantity);
-      item.updatedAt  = new Date().toISOString();
-      if (clearExpiryWhenEmpty(item)) clearedItem = item;
+      // チェック→「ある」に戻す / アンチェック→チェック前の状態に戻す
+      if (shop.checked) {
+        shop.prevStock = item.stock;
+        item.stock = 'ok';
+        restockedItem = item;
+      } else {
+        item.stock = shop.prevStock || 'low';
+      }
+      item.updatedAt = new Date().toISOString();
     }
   }
 
   saveState();
   renderShopping();
   updateShoppingBadge();
-  if (clearedItem) showToast(`${clearedItem.name} の在庫が0になったので消費期限を消しました 🗓️`);
+  if (restockedItem) showToast(`${restockedItem.name} を「ある」に戻しました ✅`);
 }
 
 function deleteShopItem(shopId) {
@@ -1773,8 +1539,6 @@ function clearCheckedShopItems() {
 
 function openAddShopItem() {
   $('shopItemName').value = '';
-  $('shopItemQty').value  = '1';
-  $('shopItemUnit').value = '個';
   openModal('shopModal');
   setTimeout(() => $('shopItemName').focus(), 80);
 }
@@ -1784,8 +1548,6 @@ function saveShopItem() {
   if (!name) { showToast('品名を入力してください', true); return; }
   state.shoppingList.push({
     id: uid(), itemId: null, name,
-    quantity:  parseFloat($('shopItemQty').value) || 1,
-    unit:      $('shopItemUnit').value,
     checked:   false,
     addedAt:   new Date().toISOString(),
     auto:      false,
@@ -1889,11 +1651,11 @@ function closeModal(id) {
   document.body.style.overflow = '';
 }
 
-// オーバーレイタップで閉じる
+// オーバーレイタップで閉じる（品目の編集中は保存してから閉じる）
 document.addEventListener('click', e => {
   if (e.target.classList.contains('modal-overlay')) {
-    e.target.classList.remove('open');
-    document.body.style.overflow = '';
+    if (e.target.id === 'itemModal') closeItemModal();
+    else closeModal(e.target.id);
   }
 });
 
@@ -2045,8 +1807,7 @@ function setupStockListActions() {
     if (!card) return;
     const itemId = card.dataset.id;
     const action = e.target.closest('[data-action]')?.dataset.action;
-    if (action === 'inc')  { changeQty(itemId, 1);  return; }
-    if (action === 'dec')  { changeQty(itemId, -1); return; }
+    if (action === 'stock') { setStock(itemId, e.target.closest('[data-action]').dataset.value); return; }
     if (action === 'fav')  { toggleFavorite(itemId); return; }
     openEditItem(itemId);
   });
@@ -2074,7 +1835,8 @@ function setupModalKeys() {
     if (!modalId) return;
     if (e.key === 'Escape') {
       e.preventDefault();
-      closeModal(modalId);
+      if (modalId === 'itemModal') closeItemModal();
+      else closeModal(modalId);
       return;
     }
     // 1行テキスト入力での Enter は保存（テキストエリアや検索欄は除く）
@@ -2114,7 +1876,7 @@ function init() {
     sortSelect.addEventListener('change', () => switchSort(sortSelect.value));
   }
 
-  // 置き場所ピッカーのカテゴリ選択肢
+  // 置き場所のカテゴリ選択肢
   const locCategory = $('itemLocCategory');
   if (locCategory) {
     locCategory.innerHTML = CATEGORIES.filter(c => c.id !== 'all')
@@ -2123,14 +1885,15 @@ function init() {
     updateLocationPickerSubcats();
   }
 
-  $('itemDateType')?.addEventListener('change', updateDateTypeLabel);
-  $('itemStockMode')?.addEventListener('change', updateStockModeFields);
-  $('itemPhoto')?.addEventListener('change', handleItemPhotoChange);
+  // モーダル内の在庫状態ボタン
+  const stockSeg = $('itemStockSeg');
+  if (stockSeg) {
+    stockSeg.innerHTML = STOCK_LEVELS.map(l =>
+      `<button type="button" class="stock-seg-btn level-${l.id}" data-value="${l.id}" onclick="setStockDraft('${l.id}')">${l.label}</button>`
+    ).join('');
+  }
 
-  // ユニット選択肢を生成
-  document.querySelectorAll('.unit-select').forEach(sel => {
-    sel.innerHTML = UNITS.map(u => `<option value="${u}">${u}</option>`).join('');
-  });
+  $('itemDateType')?.addEventListener('change', updateDateTypeLabel);
 
   // タブボタン
   document.querySelectorAll('.tab-btn').forEach(btn => {
