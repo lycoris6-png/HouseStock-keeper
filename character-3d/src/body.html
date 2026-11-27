@@ -1,0 +1,39 @@
+<canvas id="stage" role="img" aria-label="スカーフの少年の3Dモデル。ドラッグで回転、スクロールで拡大"></canvas>
+
+<header class="title">
+  <h1>スカーフの少年</h1>
+  <p class="sub">リファレンス画像から起こした、ボーン入りの3Dモデル。</p>
+  <p class="stats" id="stats"></p>
+</header>
+
+<div class="dock">
+  <p class="hint">ドラッグで回転 · スクロールやピンチで拡大</p>
+  <div class="row" role="toolbar" aria-label="表示の操作">
+    <div class="seg" role="group" aria-label="ポーズ">
+      <button id="pose-leap" type="button" aria-pressed="true">ジャンプ</button>
+      <button id="pose-apose" type="button" aria-pressed="false">Aポーズ</button>
+    </div>
+    <div class="seg" role="group" aria-label="視点">
+      <button id="view-front" type="button">正面</button>
+      <button id="view-q" type="button">斜め</button>
+      <button id="view-side" type="button">横</button>
+      <button id="view-back" type="button">背面</button>
+    </div>
+  </div>
+  <div class="row">
+    <div class="seg" role="group" aria-label="シェーディング">
+      <button id="style-toon" type="button" aria-pressed="true">トゥーン</button>
+      <button id="style-pbr" type="button" aria-pressed="false">PBR</button>
+    </div>
+    <div class="seg" role="group" aria-label="オプション">
+      <button id="opt-outline" type="button" aria-pressed="true">輪郭線</button>
+      <button id="opt-wire" type="button" aria-pressed="false">ワイヤー</button>
+      <button id="opt-spin" type="button" aria-pressed="false">自動回転</button>
+    </div>
+    <div class="seg dl" role="group" aria-label="書き出し">
+      <button id="dl-pose" type="button">GLB (ジャンプ)</button>
+      <button id="dl-apose" type="button">GLB (Aポーズ)</button>
+      <button id="dl-zip" type="button" hidden>2つのGLBをZIPで保存</button>
+    </div>
+  </div>
+</div>

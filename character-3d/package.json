@@ -1,0 +1,20 @@
+{
+  "name": "character-3d",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Procedural, rigged 3D character built from a 2D reference illustration (Three.js).",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "export": "node export.mjs",
+    "validate": "node validate.mjs",
+    "all": "node build.mjs && node export.mjs && node validate.mjs"
+  },
+  "dependencies": {
+    "esbuild": "^0.21.5",
+    "three": "^0.160.0"
+  },
+  "devDependencies": {
+    "gltf-validator": "^2.0.0-dev.3.10"
+  }
+}
